@@ -2,17 +2,23 @@ import json
 import pandas as pd
 
 
-def change_jsonl_to_csv(input_file, output_file, prompt_column="prompt", response_column="response"):
+def change_jsonl_to_csv(input_file, output_file, prompt_column="prompt", response_column="response", model="gpt"):
     prompts = []
     responses = []
+
     with open(input_file, 'r') as json_file:
         for data in json_file:
-            prompts.append(json.loads(data)[0]['messages'][0]['content'])
-            responses.append(json.loads(data)[1]['choices'][0]['message']['content'])
+            json_data = json.loads(data)
 
-    df = pd.DataFrame({prompt_column: prompts, response_column: responses})
-    df.to_csv(output_file, index=False)
-    return df
+            prompts.append(json_data[0]['messages'][0]['content'])
+            if model.lower().startswith('gpt'):
+                responses.append(json_data[1]['choices'][0]['message']['content'])
+            else:
+                responses.append(json_data[1]['message']['content'])
+
+    dfs = pd.DataFrame({prompt_column: prompts, response_column: responses})
+    dfs.to_csv(output_file, index=False)
+    return dfs
 
 
 def merge_gt_and_gen_result(df_gt, df_gen):
@@ -46,17 +52,32 @@ Answer:""")
             json_string = json.dumps(job)
             f.write(json_string + "\n")
 
-def make_prompt(ddl, request, sql=""):
-    prompt = f"""당신은 SQL을 생성하는 SQL 봇입니다. DDL과 요청사항을 바탕으로 적절한 SQL 쿼리를 생성하세요.
+def make_prompt(ddl, request, sql="", llm="common"):
+    if llm == "sqlcoder":
+        prompt = f"""
+            ### Task
+            Generate a SQL query to answer [QUESTION]{request}[/QUESTION]
 
-DDL:
-{ddl}
+            ### Database Schema
+            The query will run on a database with the following schema:
+            {ddl}
 
-요청사항:
-{request}
+            ### Answer
+            Given the database schema, here is the SQL query that [QUESTION]{request}[/QUESTION]
+            [SQL]
+            {sql}"""
+    else:
+        prompt = f"""당신은 SQL을 생성하는 SQL 봇입니다. DDL과 요청사항을 바탕으로 적절한 SQL 쿼리를 생성하세요.
 
-SQL:
-{sql}"""
+    DDL:
+    {ddl}
+
+    요청사항:
+    {request}
+
+    SQL:
+    {sql}"""
+
     return prompt
 
 
