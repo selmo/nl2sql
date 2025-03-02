@@ -308,6 +308,7 @@ def merge_model(base_model, finetuned_model, prefix=''):
 
 import sys
 
+# main routine
 if __name__ == "__main__":
     prefix = "20250302"
     datapath = path.join(prefix, 'data')
