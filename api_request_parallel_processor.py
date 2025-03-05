@@ -1,3 +1,5 @@
+# %%
+# imports
 import aiohttp  # for making API calls concurrently
 import argparse  # for running script from command line
 import asyncio  # for running API calls concurrently
@@ -14,15 +16,15 @@ from dataclasses import (
 
 
 async def process_api_requests_from_file(
-        requests_filepath: str,
-        save_filepath: str,
-        request_url: str,
-        api_key: str,
-        max_requests_per_minute: float,
-        max_tokens_per_minute: float,
-        token_encoding_name: str,
-        max_attempts: int,
-        logging_level: int,
+    requests_filepath: str,
+    save_filepath: str,
+    request_url: str,
+    api_key: str,
+    max_requests_per_minute: float,
+    max_tokens_per_minute: float,
+    token_encoding_name: str,
+    max_attempts: int,
+    logging_level: int,
 ):
     """Processes API requests in parallel, throttling to stay under rate limits."""
     # constants
@@ -117,8 +119,8 @@ async def process_api_requests_from_file(
                 if next_request:
                     next_request_tokens = next_request.token_consumption
                     if (
-                            available_request_capacity >= 1
-                            and available_token_capacity >= next_request_tokens
+                        available_request_capacity >= 1
+                        and available_token_capacity >= next_request_tokens
                     ):
                         # update counters
                         available_request_capacity -= 1
@@ -147,15 +149,15 @@ async def process_api_requests_from_file(
 
                 # if a rate limit error was hit recently, pause to cool down
                 seconds_since_rate_limit_error = (
-                        time.time() - status_tracker.time_of_last_rate_limit_error
+                    time.time() - status_tracker.time_of_last_rate_limit_error
                 )
                 if (
-                        seconds_since_rate_limit_error
-                        < seconds_to_pause_after_rate_limit_error
+                    seconds_since_rate_limit_error
+                    < seconds_to_pause_after_rate_limit_error
                 ):
                     remaining_seconds_to_pause = (
-                            seconds_to_pause_after_rate_limit_error
-                            - seconds_since_rate_limit_error
+                        seconds_to_pause_after_rate_limit_error
+                        - seconds_since_rate_limit_error
                     )
                     await asyncio.sleep(remaining_seconds_to_pause)
                     # ^e.g., if pause is 15 seconds and final limit was hit 5 seconds ago
@@ -206,20 +208,20 @@ class APIRequest:
     result: list = field(default_factory=list)
 
     async def call_api(
-            self,
-            session: aiohttp.ClientSession,
-            request_url: str,
-            request_header: dict,
-            retry_queue: asyncio.Queue,
-            save_filepath: str,
-            status_tracker: StatusTracker,
+        self,
+        session: aiohttp.ClientSession,
+        request_url: str,
+        request_header: dict,
+        retry_queue: asyncio.Queue,
+        save_filepath: str,
+        status_tracker: StatusTracker,
     ):
         """Calls the OpenAI API and saves results."""
         logging.info(f"Starting request #{self.task_id}")
         error = None
         try:
             async with session.post(
-                    url=request_url, headers=request_header, json=self.request_json
+                url=request_url, headers=request_header, json=self.request_json
             ) as response:
                 response = await response.json()
             if "error" in response:
@@ -235,8 +237,9 @@ class APIRequest:
                         1  # rate limit errors are counted separately
                     )
 
+            logging.info(f"Response #{self.task_id}: {response}")
         except (
-                Exception
+            Exception
         ) as e:  # catching naked exceptions is bad practice, but in this case we'll log & save them
             logging.warning(f"Request {self.task_id} failed with Exception {e}")
             status_tracker.num_other_errors += 1
@@ -279,7 +282,7 @@ def api_endpoint_from_url(request_url):
         # for Azure OpenAI deployment urls
         match = re.search(r"^https://[^/]+/openai/deployments/[^/]+/(.+?)(\?|$)", request_url)
     if match is None:
-        return request_url
+        return "chat/completions"
     else:
         return match[1]
 
@@ -292,9 +295,9 @@ def append_to_jsonl(data, filename: str) -> None:
 
 
 def num_tokens_consumed_from_request(
-        request_json: dict,
-        api_endpoint: str,
-        token_encoding_name: str,
+    request_json: dict,
+    api_endpoint: str,
+    token_encoding_name: str,
 ):
     """Count the number of tokens in the request. Only supports completion and embedding requests."""
     encoding = tiktoken.get_encoding(token_encoding_name)
@@ -361,10 +364,10 @@ def task_id_generator_function():
 def process(
         requests_filepath: str,
         save_filepath: str = None,
-        request_url: str = "https://api.openai.com/v1/embeddings",
+        request_url: str = "https://api.openai.com/v1/chat/completions",
         api_key: str = os.getenv("OPENAI_API_KEY"),
-        max_requests_per_minute: float = 3_000 * 0.5,
-        max_tokens_per_minute: float = 250_000 * 0.5,
+        max_requests_per_minute: float = 1500,
+        max_tokens_per_minute: float = 125000,
         token_encoding_name: str = "cl100k_base",
         max_attempts: int = 5,
         logging_level: int = logging.INFO,
@@ -396,7 +399,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--requests_filepath")
     parser.add_argument("--save_filepath", default=None)
-    parser.add_argument("--request_url", default="https://api.openai.com/v1/embeddings")
+    parser.add_argument("--request_url", default="https://api.openai.com/v1/chat/completions")
     parser.add_argument("--api_key", default=os.getenv("OPENAI_API_KEY"))
     parser.add_argument("--max_requests_per_minute", type=int, default=3_000 * 0.5)
     parser.add_argument("--max_tokens_per_minute", type=int, default=250_000 * 0.5)
