@@ -1,0 +1,8 @@
+transformers
+bitsandbytes
+accelerate
+datasets
+tiktoken
+huggingface_hub
+autotrain-advanced
+huggingface-hub
