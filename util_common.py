@@ -53,9 +53,9 @@ def make_request_jobs(model, prompts):
     return jobs
 
 
-def make_requests_for_evaluation(df, filename, dir='requests', model="gpt-4o-mini"):
-    if not Path(dir).exists():
-        Path(dir).mkdir(parents=True)
+def make_requests_for_evaluation(df, directory='requests'):
+    if not Path(directory).exists():
+        Path(directory).mkdir(parents=True)
     prompts = []
     for idx, row in df.iterrows():
         prompts.append(
@@ -69,12 +69,7 @@ gt_sql: {row['answer']}
 gen_sql: {row['gen_sql']}"""
         )
 
-    jobs = make_request_jobs(model, prompts)
-
-    with open(Path(dir, filename), "w") as f:
-        for job in jobs:
-            json_string = json.dumps(job)
-            f.write(json_string + "\n")
+    return prompts
 
 
 def autotrain(

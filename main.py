@@ -6,61 +6,14 @@ import logging
 
 import os.path as path
 
-from aux_common import prepare_train_dataset, prepare_test_dataset, merge_model
-from util_common import check_and_create_directory, clean_filepath, make_requests_for_evaluation, autotrain
+from aux_common import prepare_train_dataset, prepare_test_dataset, merge_model, evaluation
+from util_common import check_and_create_directory, autotrain
 
 # 로깅 설정 (원하는 포맷과 레벨로 조정 가능)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
-
-
-def evaluation(ft_model, verifying_model, dataset, prefix):
-    eval_filepath = "text2sql.jsonl"
-
-    logging.info("DataFrame:\n%s", dataset)
-    logging.info("Evaluation file path: %s", eval_filepath)
-
-    requests_path = path.join(prefix, 'requests')
-    results_path = path.join(prefix, 'results')
-    requests_filepath = clean_filepath(eval_filepath, prefix=requests_path)
-    save_filepath = clean_filepath(eval_filepath, prefix=results_path)
-    output_file = clean_filepath(f"{ft_model}.csv", prefix=results_path)
-    check_and_create_directory(path.dirname(requests_filepath))
-    check_and_create_directory(path.dirname(save_filepath))
-    check_and_create_directory(path.dirname(output_file))
-
-    # 평가를 위한 requests.jsonl 생성
-    make_requests_for_evaluation(dataset, eval_filepath, dir=requests_path, model=verifying_model)
-
-    url = "https://api.openai.com/v1/chat/completions" if verifying_model.lower().startswith(
-        'gpt') else "http://172.16.15.112:11434/api/chat"
-
-    api_request_parallel_processor.process(
-        requests_filepath=requests_filepath,
-        save_filepath=save_filepath,
-        request_url=url,
-        max_requests_per_minute=2500,
-        max_tokens_per_minute=100000,
-        token_encoding_name="cl100k_base",
-        max_attempts=10,
-        logging_level=20
-    )
-    base_eval = utils.change_jsonl_to_csv(
-        save_filepath,
-        output_file,
-        # "prompt",
-        response_column="resolve_yn",
-        model=verifying_model
-    )
-
-    base_eval['resolve_yn'] = base_eval['resolve_yn'].apply(lambda x: json.loads(x)['resolve_yn'])
-    num_correct_answers = base_eval.query("resolve_yn == 'yes'").shape[0]
-
-    logging.info("Evaluation CSV:\n%s", base_eval)
-    logging.info("Number of correct answers: %s", num_correct_answers)
-
 
 import sys
 
@@ -72,9 +25,9 @@ if __name__ == "__main__":
 
     # base_model = 'defog/sqlcoder-7b-2'
     # finetuned_model = "sqlcoder-finetuned"
-    verifying_model = "deepseek-r1:70b" #"llama3.3:70b"
-    base_model = "qwq"
-    finetuned_model = "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
+    verifying_model = "deepseek-r1:70b"  # "llama3.3:70b"
+    base_model = ''  # 'qwq'
+    finetuned_model = "Qwen/QwQ-32B-AWQ"  # "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
 
     if len(sys.argv) > 1:
         if sys.argv[1] == 'train':
@@ -108,8 +61,17 @@ if __name__ == "__main__":
             test_dataset = prepare_test_dataset(finetuned_model, prefix)
             evaluation(finetuned_model, verifying_model, test_dataset, prefix)
 
+        elif sys.argv[1] == 'eval-local':
+            finetuned_model = "qwq"
+            merge_model(base_model, finetuned_model, prefix)
+            test_dataset = aux_local.prepare_test_dataset(finetuned_model, prefix)
+            evaluation(finetuned_model, verifying_model, test_dataset, prefix)
+
         elif sys.argv[1] == 'eval-ollama':
-            test_dataset = aux_ollama.prepare_test_dataset(base_model, verifying_model, prefix)
+            finetuned_model = "qwq"
+            merge_model(base_model, finetuned_model, prefix)
+            test_dataset = aux_local.prepare_test_dataset(finetuned_model, prefix)
+            evaluation(finetuned_model, verifying_model, test_dataset, prefix)
 
         else:
             print('Arg:\n\ttrain: Finetuning model\n\ttest|eval: Evaluation model')

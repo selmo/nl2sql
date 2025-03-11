@@ -1,14 +1,17 @@
+import json
+
+import api_request_parallel_processor
+import util_common
 import pandas as pd
 import logging
 import torch
-from os import path
 
+from os import path
 from datasets import load_dataset
 from peft import PeftModel
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-
-import util_common
 from utils import make_prompt
+from util_common import check_and_create_directory, clean_filepath, make_requests_for_evaluation, make_request_jobs
 
 # 로깅 설정 (원하는 포맷과 레벨로 조정 가능)
 logging.basicConfig(
@@ -19,8 +22,9 @@ logging.basicConfig(
 
 def make_inference_pipeline(model_id):
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto", load_in_4bit=True,
-                                                 bnb_4bit_compute_dtype=torch.float16)
+    model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
+    #, load_in_4bit)=True,
+    #                                    bnb_4bit_compute_dtype=torch.float16)
     pipe = pipeline("text-generation", model=model, tokenizer=tokenizer)
     return pipe
 
@@ -131,3 +135,57 @@ def merge_model(base_model, finetuned_model, prefix=''):
         logging.info("start saving model and tokenizer.")
         model.save_pretrained(filepath)
         tokenizer.save_pretrained(filepath)
+
+
+def evaluation(ft_model, verifying_model, dataset, prefix):
+    eval_filepath = "text2sql.jsonl"
+
+    logging.info("DataFrame:\n%s", dataset)
+    logging.info("Evaluation file path: %s", eval_filepath)
+
+    requests_path = path.join(prefix, 'requests')
+    results_path = path.join(prefix, 'results')
+    requests_filepath = clean_filepath(eval_filepath, prefix=requests_path)
+    save_filepath = clean_filepath(eval_filepath, prefix=results_path)
+    output_file = clean_filepath(f"{ft_model}.csv", prefix=results_path)
+    check_and_create_directory(path.dirname(requests_filepath))
+    check_and_create_directory(path.dirname(save_filepath))
+    check_and_create_directory(path.dirname(output_file))
+
+    # 평가를 위한 requests.jsonl 생성
+    prompts = make_requests_for_evaluation(dataset, directory=requests_path)
+
+    jobs = make_request_jobs(verifying_model, prompts)
+
+    with open(requests_filepath, "w") as f:
+        for job in jobs:
+            json_string = json.dumps(job)
+            f.write(json_string + "\n")
+
+    url = "https://api.openai.com/v1/chat/completions" if verifying_model.lower().startswith(
+        'gpt') else "http://172.16.15.112:11434/api/chat"
+
+    api_request_parallel_processor.process(
+        requests_filepath=requests_filepath,
+        save_filepath=save_filepath,
+        request_url=url,
+        max_requests_per_minute=2500,
+        max_tokens_per_minute=100000,
+        token_encoding_name="cl100k_base",
+        max_attempts=10,
+        logging_level=20
+    )
+    import utils
+    base_eval = utils.change_jsonl_to_csv(
+        save_filepath,
+        output_file,
+        # "prompt",
+        response_column="resolve_yn",
+        model=verifying_model
+    )
+
+    base_eval['resolve_yn'] = base_eval['resolve_yn'].apply(lambda x: json.loads(x)['resolve_yn'])
+    num_correct_answers = base_eval.query("resolve_yn == 'yes'").shape[0]
+
+    logging.info("Evaluation CSV:\n%s", base_eval)
+    logging.info("Number of correct answers: %s", num_correct_answers)
