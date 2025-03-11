@@ -1,12 +1,12 @@
 import api_request_parallel_processor
-import aux_ollama
+import aux_local
 import utils
 import json
 import logging
 
 import os.path as path
 
-from aux_gpt import prepare_train_dataset, prepare_test_dataset, merge_model
+from aux_common import prepare_train_dataset, prepare_test_dataset, merge_model
 from util_common import check_and_create_directory, clean_filepath, make_requests_for_evaluation, autotrain
 
 # 로깅 설정 (원하는 포맷과 레벨로 조정 가능)
@@ -66,14 +66,14 @@ import sys
 
 # main routine
 if __name__ == "__main__":
-    prefix = "20250304-ollama"
+    prefix = "20250310"
     datapath = path.join(prefix, 'data')
     check_and_create_directory(datapath)
 
     # base_model = 'defog/sqlcoder-7b-2'
     # finetuned_model = "sqlcoder-finetuned"
     verifying_model = "deepseek-r1:70b" #"llama3.3:70b"
-    base_model = ''
+    base_model = "qwq"
     finetuned_model = "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
 
     if len(sys.argv) > 1:
@@ -109,7 +109,7 @@ if __name__ == "__main__":
             evaluation(finetuned_model, verifying_model, test_dataset, prefix)
 
         elif sys.argv[1] == 'eval-ollama':
-            test_dataset = aux_ollama.prepare_test_dataset(verifying_model, verifying_model, prefix)
+            test_dataset = aux_ollama.prepare_test_dataset(base_model, verifying_model, prefix)
 
         else:
             print('Arg:\n\ttrain: Finetuning model\n\ttest|eval: Evaluation model')

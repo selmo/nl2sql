@@ -6,3 +6,4 @@ tiktoken
 huggingface_hub
 autotrain-advanced
 huggingface-hub
+pydantic
