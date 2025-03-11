@@ -4,6 +4,8 @@ import logging
 import re
 
 from langchain_core.exceptions import OutputParserException
+
+import api_request_parallel_processor
 from util_common import clean_filepath, check_and_create_directory
 from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field, model_validator
@@ -313,7 +315,7 @@ def make_request_jobs(model, prompts):
 
     return jobs
 
-def prepare_test_ollma(model, prefix=''):
+def prepare_test_ollama(model, prefix=''):
     check_and_create_directory(prefix)
     filepath = path.join(prefix, "saved_results.jsonl")
 
@@ -341,15 +343,19 @@ def prepare_test_ollma(model, prefix=''):
                 json_string = json.dumps(job)
                 f.write(json_string + "\n")
 
-        # model, parser = prepare_model_and_parser(model)
-        #
-        # for idx, row in df.iterrows():
-        #     gen_sql = llm_invoke(model, row)
-        #     cleaned_sql = clean_response(parser, gen_sql)
-        #
-        #     logging.info(f'cleaned sql #{idx}: {cleaned_sql.gen_sql}')
-        #
-        #     df.loc[idx, 'gen_sql'] = cleaned_sql.gen_sql
+        url = "https://api.openai.com/v1/chat/completions" if model.lower().startswith(
+            'gpt') else "http://172.16.15.112:11434/api/chat"
+
+        api_request_parallel_processor.process(
+            requests_filepath=requests_filepath,
+            save_filepath=save_filepath,
+            request_url=url,
+            max_requests_per_minute=2500,
+            max_tokens_per_minute=100000,
+            token_encoding_name="cl100k_base",
+            max_attempts=10,
+            logging_level=20
+        )
 
         logging.info(f"Data Columns: {df.keys()}")
         logging.info(f"Data: {df}")
