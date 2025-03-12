@@ -5,6 +5,7 @@ import os.path as path
 
 from aux_common import prepare_train_dataset, prepare_test_dataset, merge_model, evaluation
 from util_common import check_and_create_directory, autotrain
+from utils import load_csv
 
 # 로깅 설정 (원하는 포맷과 레벨로 조정 가능)
 logging.basicConfig(
@@ -69,6 +70,13 @@ if __name__ == "__main__":
             merge_model(base_model, finetuned_model, prefix)
             test_dataset = aux_local.prepare_test_ollama(finetuned_model, prefix)
             evaluation(finetuned_model, verifying_model, test_dataset, prefix)
+
+        elif sys.argv[1] == 'eval':
+            base_eval = load_csv(sys.argv[1])
+            num_correct_answers = base_eval.query("resolve_yn == 'yes'").shape[0]
+
+            logging.info("Evaluation CSV:\n%s", base_eval)
+            logging.info("Number of correct answers: %s", num_correct_answers)
 
         else:
             print('Arg:\n\ttrain: Finetuning model\n\ttest|eval: Evaluation model')

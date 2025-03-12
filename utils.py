@@ -92,6 +92,14 @@ def make_prompt(ddl, request, sql="", llm="common"):
 
     return prompt
 
+
+def load_csv(filepath):
+    base_eval = pd.read_csv(filepath)
+    base_eval['resolve_yn'] = base_eval['resolve_yn'].apply(lambda x: json.loads(x)['resolve_yn'])
+
+    return base_eval
+
+
 if __name__ == '__main__':
     df = pd.read_csv('./nl2sql_validation.csv')
     df.sample(100).to_csv('nl2sql_validation_sample.csv', index=False)
