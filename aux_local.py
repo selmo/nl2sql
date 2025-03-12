@@ -379,7 +379,7 @@ def prepare_test_ollama(model, prefix=''):
                 prompts.append(json_data[0]['messages'][0]['content'])
                 responses.append(json_data[1]['message']['content'])
 
-        dfs = pd.DataFrame({"prompt": prompts, : responses})
+        dfs = pd.DataFrame({"prompt": prompts, "response": responses})
 
         dfs.to_json(filepath, orient='records', lines=True)
         logging.info(f"File saved: {filepath}")
