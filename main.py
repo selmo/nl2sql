@@ -1,6 +1,6 @@
 import aux_local
 import logging
-
+import sys
 import os.path as path
 
 from aux_common import prepare_train_dataset, prepare_test_dataset, merge_model, evaluation
@@ -12,8 +12,6 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
-
-import sys
 
 # main routine
 if __name__ == "__main__":
