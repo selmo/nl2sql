@@ -85,11 +85,6 @@ def llm_invoke(model, prompt):
 
 
 def extract_sql_queries(text: str) -> str:
-    """
-    주어진 텍스트에서 SQL 쿼리만을 추출해 리스트로 반환한다.
-    - \```sql ... \``` 형태
-    - \boxed{ ... } 형태
-    """
     # 1) ```sql ... ``` 패턴
     pattern_triple_backticks = re.compile(r"```sql\s*(.*?)\s*```", re.DOTALL)
 
@@ -372,8 +367,8 @@ def prepare_test_ollama(model, prefix=''):
             logging_level=20
         )
 
-        logging.info(f"Data Columns: {df.keys()}")
-        logging.info(f"Data: {df}")
+        # logging.info(f"Data Columns: {df.keys()}")
+        # logging.info(f"Data: {df}")
 
         df.to_json(filepath, orient='records', lines=True)
         logging.info(f"File saved: {filepath}")
@@ -381,5 +376,11 @@ def prepare_test_ollama(model, prefix=''):
         logging.info(f"File exists. Loading data file: {filepath}")
         df = pd.read_json(filepath, lines=True)
         logging.info("File loaded.")
+
+    results_path = path.join(prefix, 'results')
+    save_filepath = path.join(results_path, f'{model}.sav')
+    data = pd.read_csv(save_filepath)
+    logging.info('keys: %s', data.keys())
+    logging.info('data: %s', data)
 
     return df
