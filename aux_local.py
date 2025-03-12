@@ -379,6 +379,7 @@ def prepare_test_ollama(model, prefix=''):
 
     results_path = path.join(prefix, 'results')
     save_filepath = path.join(results_path, f'{model}.sav')
+    logging.info('loading file: %s', save_filepath)
     data = pd.read_csv(save_filepath)
     logging.info('keys: %s', data.keys())
     logging.info('data: %s', data)
