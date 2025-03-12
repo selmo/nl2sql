@@ -303,13 +303,28 @@ Here is the output schema:
 
 def make_request_jobs(model, prompts):
     jobs = [{"model": model,
-             "response_format": {
-                 "type": "json_object"
-             },
+             "stream": False,
              "messages": [
                  {"role": "system",
                   "content": prompt}
-             ]
+             ],
+             "format": {
+                 "type": "object",
+                 "properties": {
+                     "reasoning": {
+                         "type": "string"
+                     },
+                     "description": {
+                         "type": "string"
+                     },
+                     "gen_sql": {
+                         "type": "string"
+                     }
+                 },
+                 "required": [
+                     "reasoning", "description", "gen_sql"
+                 ]
+             }
              } for prompt in prompts
             ]
 
