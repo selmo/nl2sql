@@ -71,8 +71,8 @@ if __name__ == "__main__":
             test_dataset = aux_local.prepare_test_ollama(finetuned_model, prefix)
             evaluation(finetuned_model, verifying_model, test_dataset, prefix)
 
-        elif sys.argv[1] == 'eval':
-            base_eval = load_csv(sys.argv[1])
+        elif sys.argv[1] == 'eval-csv':
+            base_eval = load_csv(sys.argv[2])
             num_correct_answers = base_eval.query("resolve_yn == 'yes'").shape[0]
 
             logging.info("Evaluation CSV:\n%s", base_eval)
