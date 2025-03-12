@@ -237,6 +237,8 @@ def prepare_test_dataset(model, prefix=''):
     else:
         logging.info(f"File exists. Loading data file: {filepath}")
         df = pd.read_json(filepath, lines=True)
+        logging.info(f"Data Columns: {df.keys()}")
+        logging.info(f"Data: {df}")
         logging.info("File loaded.")
 
     return df
@@ -367,14 +369,23 @@ def prepare_test_ollama(model, prefix=''):
             logging_level=20
         )
 
-        # logging.info(f"Data Columns: {df.keys()}")
-        # logging.info(f"Data: {df}")
+        prompts = []
+        responses = []
+        with open(save_filepath, 'r') as json_file:
+            for data in json_file:
+                json_data = json.loads(data)
 
-        df.to_json(filepath, orient='records', lines=True)
+                logging.info(f"json_data: {json_data}")
+                prompts.append(json_data[0]['messages'][0]['content'])
+                responses.append(json_data[1]['message']['content'])
+
+        dfs = pd.DataFrame({"prompt": prompts, : responses})
+
+        dfs.to_json(filepath, orient='records', lines=True)
         logging.info(f"File saved: {filepath}")
     else:
         logging.info(f"File exists. Loading data file: {filepath}")
-        df = pd.read_json(filepath, lines=True)
+        dfs = pd.read_json(filepath, lines=True)
         logging.info("File loaded.")
 
     results_path = path.join(prefix, 'results')
@@ -384,4 +395,4 @@ def prepare_test_ollama(model, prefix=''):
     logging.info('keys: %s', data.keys())
     logging.info('data: %s', data)
 
-    return df
+    return dfs
