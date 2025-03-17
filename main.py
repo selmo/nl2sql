@@ -15,7 +15,7 @@ logging.basicConfig(
 
 # main routine
 if __name__ == "__main__":
-    prefix = "20250311"
+    prefix = "20250317"
     datapath = path.join(prefix, 'data')
     check_and_create_directory(datapath)
 
@@ -57,14 +57,14 @@ if __name__ == "__main__":
             test_dataset = prepare_test_dataset(finetuned_model, prefix)
             evaluation(finetuned_model, verifying_model, test_dataset, prefix)
 
-        elif sys.argv[1] == 'eval-local':
+        elif sys.argv[1] == 'ollama-api':
             finetuned_model = "qwq"
             merge_model(base_model, finetuned_model, prefix)
             test_dataset = aux_local.prepare_test_dataset(finetuned_model, prefix)
             evaluation(finetuned_model, verifying_model, test_dataset, prefix)
 
-        elif sys.argv[1] == 'eval-ollama':
-            finetuned_model = "qwq"
+        elif sys.argv[1] == 'ollama-http':
+            finetuned_model = "gemma3:27b"
             merge_model(base_model, finetuned_model, prefix)
             test_dataset = aux_local.prepare_test_ollama(finetuned_model, prefix)
             evaluation(finetuned_model, verifying_model, test_dataset, prefix)

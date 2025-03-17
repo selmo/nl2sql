@@ -327,6 +327,7 @@ def make_request_jobs(model, prompts):
 
     return jobs
 
+
 def prepare_test_ollama(model, prefix=''):
     check_and_create_directory(prefix)
     filepath = path.join(prefix, "saved_results.jsonl")
@@ -345,6 +346,7 @@ def prepare_test_ollama(model, prefix=''):
         # 데이터셋 불러오기
         df = load_dataset("shangrilar/ko_text2sql", "origin")['test']
         df = df.to_pandas()
+        logging.info('column: %s', df.keys())
 
         # 평가를 위한 requests.jsonl 생성
         prompts = make_requests_for_generation(df, directory=requests_path)
@@ -386,13 +388,14 @@ def prepare_test_ollama(model, prefix=''):
     else:
         logging.info(f"File exists. Loading data file: {filepath}")
         dfs = pd.read_json(filepath, lines=True)
+        logging.info("Colums: %s", dfs.keys())
         logging.info("File loaded.")
 
-    results_path = path.join(prefix, 'results')
-    save_filepath = path.join(results_path, f'{model}.sav')
-    logging.info('loading file: %s', save_filepath)
-    data = pd.read_csv(save_filepath)
-    logging.info('keys: %s', data.keys())
-    logging.info('data: %s', data)
+    # results_path = path.join(prefix, 'results')
+    # save_filepath = path.join(results_path, f'{model}.sav')
+    # logging.info('loading file: %s', save_filepath)
+    # data = pd.read_csv(save_filepath)
+    # logging.info('keys: %s', data.keys())
+    # logging.info('data: %s', data)
 
     return dfs

@@ -1,5 +1,3 @@
-# %%
-# imports
 import aiohttp  # for making API calls concurrently
 import argparse  # for running script from command line
 import asyncio  # for running API calls concurrently
@@ -9,10 +7,7 @@ import os  # for reading API key
 import re  # for matching endpoint from request URL
 import tiktoken  # for counting tokens
 import time  # for sleeping after rate limit is hit
-from dataclasses import (
-    dataclass,
-    field,
-)  # for storing API inputs, outputs, and metadata
+from dataclasses import dataclass, field
 
 
 async def process_api_requests_from_file(
@@ -391,7 +386,220 @@ def process(
     )
 
 
-# run script
+async def process_api_requests_in_memory(
+    requests_list,
+    request_url: str,
+    api_key: str,
+    max_requests_per_minute: float,
+    max_tokens_per_minute: float,
+    token_encoding_name: str,
+    max_attempts: int,
+    logging_level: int = logging.INFO
+):
+    """
+    파일이 아닌 '메모리 상의 요청 리스트'를 받아 비동기로 병렬 호출하고,
+    최종 응답을 리스트 형태로 반환한다.
+      - requests_list: List[dict], 각 원소는 OpenAI API 규격의 JSON (model, messages...) 등
+      - return 값: List[Tuple(request_json, response_json or error_info)]
+    """
+
+    # -- 초기 세팅 --
+    logging.basicConfig(level=logging_level)
+    logger = logging.getLogger(__name__)
+
+    status_tracker = StatusTracker()
+    task_id_gen = task_id_generator_function()
+
+    api_endpoint = api_endpoint_from_url(request_url)
+    request_header = {"Authorization": f"Bearer {api_key}"}
+    # Azure OpenAI deployments의 경우 header 달라질 수 있음
+    if "/deployments" in request_url:
+        request_header = {"api-key": f"{api_key}"}
+
+    # 속도제어(Throttle) 파라미터
+    seconds_to_pause_after_rate_limit_error = 15
+    seconds_to_sleep_each_loop = 0.001
+
+    # capacity
+    available_request_capacity = max_requests_per_minute
+    available_token_capacity = max_tokens_per_minute
+    last_update_time = time.time()
+
+    # 큐(재시도용) 및 인덱스
+    from collections import deque
+    queue_of_requests_to_retry = deque()
+    current_index = 0
+    total_requests = len(requests_list)
+
+    # 결과 저장용 리스트
+    results = []
+
+    # 태스크별 상태 관리용
+    in_progress_tasks = set()  # asyncio.Task 집합
+
+    # request 구조체
+    class APIRequestInMemory:
+        def __init__(self, task_id, request_json, token_consumption, attempts_left):
+            self.task_id = task_id
+            self.request_json = request_json
+            self.token_consumption = token_consumption
+            self.attempts_left = attempts_left
+            self.result = []  # error 모음
+
+        async def call_api(self, session):
+            """실제 API 호출."""
+            logger.info(f"Starting request #{self.task_id}")
+            error = None
+            response_data = None
+            try:
+                async with session.post(request_url, headers=request_header, json=self.request_json) as response:
+                    response_data = await response.json()
+
+                if "error" in response_data:
+                    logger.warning(f"Request {self.task_id} failed with error {response_data['error']}")
+                    status_tracker.num_api_errors += 1
+                    error = response_data
+                    if "Rate limit" in response_data["error"].get("message", ""):
+                        status_tracker.time_of_last_rate_limit_error = time.time()
+                        status_tracker.num_rate_limit_errors += 1
+                        status_tracker.num_api_errors -= 1  # 별도 카운트
+            except Exception as e:
+                logger.warning(f"Request {self.task_id} failed with Exception {e}")
+                status_tracker.num_other_errors += 1
+                error = str(e)
+
+            if error:
+                self.result.append(error)
+                if self.attempts_left > 0:
+                    # 재시도
+                    queue_of_requests_to_retry.append(self)
+                else:
+                    # 실패
+                    results.append((self.request_json, {"error": self.result}))
+                    status_tracker.num_tasks_in_progress -= 1
+                    status_tracker.num_tasks_failed += 1
+            else:
+                # 성공
+                results.append((self.request_json, response_data))
+                status_tracker.num_tasks_in_progress -= 1
+                status_tracker.num_tasks_succeeded += 1
+                logger.debug(f"Request {self.task_id} succeeded.")
+
+    async with aiohttp.ClientSession() as session:
+        while True:
+            # 1) 새 request를 꺼내 올지 결정
+            if (
+                (current_index < total_requests) or (queue_of_requests_to_retry)
+            ):
+                # 우선 재시도 큐가 있으면 그걸 우선
+                if queue_of_requests_to_retry:
+                    next_request = queue_of_requests_to_retry.popleft()
+                else:
+                    request_json = requests_list[current_index]
+                    request_obj = APIRequestInMemory(
+                        task_id=next(task_id_gen),
+                        request_json=request_json,
+                        token_consumption=num_tokens_consumed_from_request(
+                            request_json, api_endpoint, token_encoding_name
+                        ),
+                        attempts_left=max_attempts
+                    )
+                    next_request = request_obj
+                    current_index += 1
+
+                status_tracker.num_tasks_started += 1
+                status_tracker.num_tasks_in_progress += 1
+            else:
+                # 더 이상 보낼 request 없음 + 재시도도 없음 => 끝났는지 체크
+                if status_tracker.num_tasks_in_progress == 0:
+                    break
+                else:
+                    next_request = None
+
+            # 2) 사용가능 capacity 업데이트
+            now = time.time()
+            elapsed = now - last_update_time
+            # 분당 제한이므로, elapsed 초 동안 얼마나 capacity가 회복되었는지 계산
+            available_request_capacity = min(
+                max_requests_per_minute,
+                available_request_capacity + max_requests_per_minute * elapsed / 60.0
+            )
+            available_token_capacity = min(
+                max_tokens_per_minute,
+                available_token_capacity + max_tokens_per_minute * elapsed / 60.0
+            )
+            last_update_time = now
+
+            # 3) next_request를 실제로 호출할지 결정
+            if next_request:
+                needed_tokens = next_request.token_consumption
+                if available_request_capacity >= 1 and available_token_capacity >= needed_tokens:
+                    # capacity 소비
+                    available_request_capacity -= 1
+                    available_token_capacity -= needed_tokens
+                    next_request.attempts_left -= 1
+                    # 실제 비동기 호출 태스크 생성
+                    task = asyncio.create_task(next_request.call_api(session))
+                    in_progress_tasks.add(task)
+                    # 태스크 완료시 set에서 제거
+                    task.add_done_callback(lambda t: in_progress_tasks.remove(t))
+                else:
+                    # capacity 모자라면 다시 큐에 넣고 대기
+                    if next_request.attempts_left >= 0:
+                        queue_of_requests_to_retry.appendleft(next_request)
+                    else:
+                        # 재시도 없다면 실패 처리
+                        results.append((next_request.request_json, {"error": "No capacity + attempts=0"}))
+                        status_tracker.num_tasks_in_progress -= 1
+                        status_tracker.num_tasks_failed += 1
+
+            # 4) 모든 태스크 완료 시점인지?
+            if status_tracker.num_tasks_in_progress == 0:
+                break
+
+            # 5) rate limit 에러 쿨다운
+            time_since_rate_limit = time.time() - status_tracker.time_of_last_rate_limit_error
+            if time_since_rate_limit < seconds_to_pause_after_rate_limit_error:
+                to_sleep = seconds_to_pause_after_rate_limit_error - time_since_rate_limit
+                logger.warning(f"Pausing {to_sleep:.1f} seconds due to rate limit error.")
+                await asyncio.sleep(to_sleep)
+
+            # 6) 조금 쉰 후 반복
+            await asyncio.sleep(seconds_to_sleep_each_loop)
+
+        # 모든 태스크가 끝날 때까지 대기
+        if in_progress_tasks:
+            await asyncio.gather(*in_progress_tasks)
+
+    # 최종 결과: (request_json, response_json or {"error": ...}) 리스트
+    return results
+
+
+def process_in_memory(
+    requests_list,
+    request_url: str,
+    api_key: str,
+    max_requests_per_minute: float = 1500,
+    max_tokens_per_minute: float = 125000,
+    token_encoding_name: str = "cl100k_base",
+    max_attempts: int = 5,
+    logging_level: int = logging.INFO
+):
+    """
+    위의 async 함수를 asyncio.run으로 감싸서 간단히 호출하고 결과를 반환하는 함수.
+    """
+    return asyncio.run(
+        process_api_requests_in_memory(
+            requests_list=requests_list,
+            request_url=request_url,
+            api_key=api_key,
+            max_requests_per_minute=max_requests_per_minute,
+            max_tokens_per_minute=max_tokens_per_minute,
+            token_encoding_name=token_encoding_name,
+            max_attempts=max_attempts,
+            logging_level=logging_level,
+        )
+    )
 
 
 if __name__ == "__main__":
