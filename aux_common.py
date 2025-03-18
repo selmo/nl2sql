@@ -165,7 +165,7 @@ def evaluation(ft_model, verifying_model, dataset, prefix):
     url = "https://api.openai.com/v1/chat/completions" if verifying_model.lower().startswith(
         'gpt') else "http://172.16.15.112:11434/api/chat"
 
-    api_request_parallel_processor.process(
+    api_request_parallel_processor.process_by_file(
         requests_filepath=requests_filepath,
         save_filepath=save_filepath,
         request_url=url,

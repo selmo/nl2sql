@@ -15,7 +15,7 @@ logging.basicConfig(
 
 # main routine
 if __name__ == "__main__":
-    prefix = "20250317"
+    prefix = "20250318-http"
     datapath = path.join(prefix, 'data')
     check_and_create_directory(datapath)
 
@@ -53,6 +53,7 @@ if __name__ == "__main__":
             )
 
         elif sys.argv[1] == 'test' or sys.argv[1] == 'eval':
+            # finetuned_model = "LGAI-EXAONE/EXAONE-Deep-32B-AWQ"
             merge_model(base_model, finetuned_model, prefix)
             test_dataset = prepare_test_dataset(finetuned_model, prefix)
             evaluation(finetuned_model, verifying_model, test_dataset, prefix)
@@ -64,7 +65,7 @@ if __name__ == "__main__":
             evaluation(finetuned_model, verifying_model, test_dataset, prefix)
 
         elif sys.argv[1] == 'ollama-http':
-            finetuned_model = "gemma3:27b"
+            finetuned_model = "qwq"
             merge_model(base_model, finetuned_model, prefix)
             test_dataset = aux_local.prepare_test_ollama(finetuned_model, prefix)
             evaluation(finetuned_model, verifying_model, test_dataset, prefix)

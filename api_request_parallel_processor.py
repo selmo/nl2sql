@@ -199,7 +199,7 @@ class APIRequest:
     request_json: dict
     token_consumption: int
     attempts_left: int
-    metadata: dict
+    metadata: dict = None
     result: list = field(default_factory=list)
 
     async def call_api(
@@ -208,12 +208,13 @@ class APIRequest:
         request_url: str,
         request_header: dict,
         retry_queue: asyncio.Queue,
-        save_filepath: str,
         status_tracker: StatusTracker,
+        save_filepath: str = None,
     ):
         """Calls the OpenAI API and saves results."""
         logging.info(f"Starting request #{self.task_id}")
         error = None
+        result_data = None
         try:
             async with session.post(
                 url=request_url, headers=request_header, json=self.request_json
@@ -232,7 +233,7 @@ class APIRequest:
                         1  # rate limit errors are counted separately
                     )
 
-            logging.info(f"Response #{self.task_id}: {response}")
+            logging.info(f"Response #{self.task_id}: OK")
         except (
             Exception
         ) as e:  # catching naked exceptions is bad practice, but in this case we'll log & save them
@@ -252,7 +253,9 @@ class APIRequest:
                     if self.metadata
                     else [self.request_json, [str(e) for e in self.result]]
                 )
-                append_to_jsonl(data, save_filepath)
+                result_data = data
+                if save_filepath is not None:
+                    append_to_jsonl(data, save_filepath)
                 status_tracker.num_tasks_in_progress -= 1
                 status_tracker.num_tasks_failed += 1
         else:
@@ -261,13 +264,14 @@ class APIRequest:
                 if self.metadata
                 else [self.request_json, response]
             )
-            append_to_jsonl(data, save_filepath)
+            result_data = data
+            if save_filepath is not None:
+                append_to_jsonl(data, save_filepath)
+                logging.debug(f"Request {self.task_id} saved to {save_filepath}")
             status_tracker.num_tasks_in_progress -= 1
             status_tracker.num_tasks_succeeded += 1
-            logging.debug(f"Request {self.task_id} saved to {save_filepath}")
 
-
-# functions
+        return result_data
 
 
 def api_endpoint_from_url(request_url):
@@ -356,7 +360,7 @@ def task_id_generator_function():
         task_id += 1
 
 
-def process(
+def process_by_file(
         requests_filepath: str,
         save_filepath: str = None,
         request_url: str = "https://api.openai.com/v1/chat/completions",
@@ -389,11 +393,11 @@ def process(
 async def process_api_requests_in_memory(
     requests_list,
     request_url: str,
-    api_key: str,
     max_requests_per_minute: float,
     max_tokens_per_minute: float,
     token_encoding_name: str,
     max_attempts: int,
+    api_key: str = '',
     logging_level: int = logging.INFO
 ):
     """
@@ -426,8 +430,7 @@ async def process_api_requests_in_memory(
     last_update_time = time.time()
 
     # 큐(재시도용) 및 인덱스
-    from collections import deque
-    queue_of_requests_to_retry = deque()
+    queue_of_requests_to_retry = asyncio.Queue()
     current_index = 0
     total_requests = len(requests_list)
 
@@ -437,66 +440,18 @@ async def process_api_requests_in_memory(
     # 태스크별 상태 관리용
     in_progress_tasks = set()  # asyncio.Task 집합
 
-    # request 구조체
-    class APIRequestInMemory:
-        def __init__(self, task_id, request_json, token_consumption, attempts_left):
-            self.task_id = task_id
-            self.request_json = request_json
-            self.token_consumption = token_consumption
-            self.attempts_left = attempts_left
-            self.result = []  # error 모음
-
-        async def call_api(self, session):
-            """실제 API 호출."""
-            logger.info(f"Starting request #{self.task_id}")
-            error = None
-            response_data = None
-            try:
-                async with session.post(request_url, headers=request_header, json=self.request_json) as response:
-                    response_data = await response.json()
-
-                if "error" in response_data:
-                    logger.warning(f"Request {self.task_id} failed with error {response_data['error']}")
-                    status_tracker.num_api_errors += 1
-                    error = response_data
-                    if "Rate limit" in response_data["error"].get("message", ""):
-                        status_tracker.time_of_last_rate_limit_error = time.time()
-                        status_tracker.num_rate_limit_errors += 1
-                        status_tracker.num_api_errors -= 1  # 별도 카운트
-            except Exception as e:
-                logger.warning(f"Request {self.task_id} failed with Exception {e}")
-                status_tracker.num_other_errors += 1
-                error = str(e)
-
-            if error:
-                self.result.append(error)
-                if self.attempts_left > 0:
-                    # 재시도
-                    queue_of_requests_to_retry.append(self)
-                else:
-                    # 실패
-                    results.append((self.request_json, {"error": self.result}))
-                    status_tracker.num_tasks_in_progress -= 1
-                    status_tracker.num_tasks_failed += 1
-            else:
-                # 성공
-                results.append((self.request_json, response_data))
-                status_tracker.num_tasks_in_progress -= 1
-                status_tracker.num_tasks_succeeded += 1
-                logger.debug(f"Request {self.task_id} succeeded.")
-
     async with aiohttp.ClientSession() as session:
         while True:
             # 1) 새 request를 꺼내 올지 결정
             if (
-                (current_index < total_requests) or (queue_of_requests_to_retry)
+                (current_index < total_requests) or (not queue_of_requests_to_retry.empty())
             ):
                 # 우선 재시도 큐가 있으면 그걸 우선
-                if queue_of_requests_to_retry:
-                    next_request = queue_of_requests_to_retry.popleft()
+                if not queue_of_requests_to_retry.empty():
+                    next_request = await queue_of_requests_to_retry.get()
                 else:
                     request_json = requests_list[current_index]
-                    request_obj = APIRequestInMemory(
+                    request_obj = APIRequest(
                         task_id=next(task_id_gen),
                         request_json=request_json,
                         token_consumption=num_tokens_consumed_from_request(
@@ -538,15 +493,36 @@ async def process_api_requests_in_memory(
                     available_request_capacity -= 1
                     available_token_capacity -= needed_tokens
                     next_request.attempts_left -= 1
+
+                    # 결과를 처리하는 콜백 함수 정의
+                    def process_completed_task(completed_task):
+                        try:
+                            # 태스크에서 결과 가져오기
+                            api_result = completed_task.result()
+                            if api_result:  # None이 아닌 경우 결과 저장
+                                results.append(api_result)
+                        except Exception as e:
+                            logging.error(f"Error processing task result: {e}")
+                        finally:
+                            # 완료된 태스크는 항상 set에서 제거
+                            in_progress_tasks.remove(completed_task)
+
                     # 실제 비동기 호출 태스크 생성
-                    task = asyncio.create_task(next_request.call_api(session))
+                    task = asyncio.create_task(next_request.call_api(
+                        session=session,
+                        request_url=request_url,
+                        request_header=request_header,
+                        retry_queue=queue_of_requests_to_retry,
+                        status_tracker=status_tracker,
+                    ))
+
                     in_progress_tasks.add(task)
                     # 태스크 완료시 set에서 제거
-                    task.add_done_callback(lambda t: in_progress_tasks.remove(t))
+                    task.add_done_callback(process_completed_task)
                 else:
                     # capacity 모자라면 다시 큐에 넣고 대기
                     if next_request.attempts_left >= 0:
-                        queue_of_requests_to_retry.appendleft(next_request)
+                        await queue_of_requests_to_retry.put(next_request)
                     else:
                         # 재시도 없다면 실패 처리
                         results.append((next_request.request_json, {"error": "No capacity + attempts=0"}))
@@ -576,9 +552,8 @@ async def process_api_requests_in_memory(
 
 
 def process_in_memory(
-    requests_list,
+    dataset,
     request_url: str,
-    api_key: str,
     max_requests_per_minute: float = 1500,
     max_tokens_per_minute: float = 125000,
     token_encoding_name: str = "cl100k_base",
@@ -588,11 +563,13 @@ def process_in_memory(
     """
     위의 async 함수를 asyncio.run으로 감싸서 간단히 호출하고 결과를 반환하는 함수.
     """
-    return asyncio.run(
+
+    requests_list = dataset['job'].tolist()
+
+    responses = asyncio.run(
         process_api_requests_in_memory(
             requests_list=requests_list,
             request_url=request_url,
-            api_key=api_key,
             max_requests_per_minute=max_requests_per_minute,
             max_tokens_per_minute=max_tokens_per_minute,
             token_encoding_name=token_encoding_name,
@@ -600,6 +577,23 @@ def process_in_memory(
             logging_level=logging_level,
         )
     )
+
+    reasonings = []
+    descriptions = []
+    gen_sqls = []
+
+    for response in responses:
+        json_data = json.loads(response[1]['message']['content'])
+        logging.info('json_data: %s', json_data)
+        reasonings.append(json_data['reasoning'])
+        descriptions.append(json_data['description'])
+        gen_sqls.append(json_data['gen_sql'])
+
+    dataset['reasoning'] = reasonings
+    dataset['description'] = descriptions
+    dataset['gen_sql'] = gen_sqls
+
+    return dataset
 
 
 if __name__ == "__main__":
@@ -633,7 +627,7 @@ if __name__ == "__main__":
     #         logging_level=int(args.logging_level),
     #     )
     # )
-    process(
+    process_by_file(
         requests_filepath=args.requests_filepath,
         save_filepath=args.save_filepath,
         request_url=args.request_url,

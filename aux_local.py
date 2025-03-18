@@ -244,9 +244,7 @@ def prepare_test_dataset(model, prefix=''):
     return df
 
 
-def make_requests_for_generation(df, directory='requests'):
-    if not Path(directory).exists():
-        Path(directory).mkdir(parents=True)
+def make_requests_for_generation(df):
     prompts = []
     format_instructions = '''The output should be formatted as a JSON instance that conforms to the JSON schema below.
 
@@ -332,64 +330,82 @@ def prepare_test_ollama(model, prefix=''):
     check_and_create_directory(prefix)
     filepath = path.join(prefix, "saved_results.jsonl")
 
-    if not Path(filepath).exists():
-        requests_path = path.join(prefix, 'requests')
-        results_path = path.join(prefix, 'results')
-        requests_filepath = clean_filepath(f'{model}.req', prefix=requests_path)
-        save_filepath = clean_filepath(f'{model}.sav', prefix=results_path)
-        output_file = clean_filepath(f"{model}.csv", prefix=results_path)
-        check_and_create_directory(path.dirname(requests_filepath))
-        check_and_create_directory(path.dirname(save_filepath))
-        check_and_create_directory(path.dirname(output_file))
+    # if not Path(filepath).exists():
+    requests_path = path.join(prefix, 'requests')
+    results_path = path.join(prefix, 'results')
+    requests_filepath = clean_filepath(f'{model}.req', prefix=requests_path)
+    save_filepath = clean_filepath(f'{model}.sav', prefix=results_path)
+    output_file = clean_filepath(f"{model}.csv", prefix=results_path)
+    check_and_create_directory(path.dirname(requests_filepath))
+    check_and_create_directory(path.dirname(save_filepath))
+    check_and_create_directory(path.dirname(output_file))
 
-        logging.info(f"File not exists. Creating data file: {filepath}")
-        # 데이터셋 불러오기
-        df = load_dataset("shangrilar/ko_text2sql", "origin")['test']
-        df = df.to_pandas()
-        logging.info('column: %s', df.keys())
+    logging.info(f"File not exists. Creating data file: {filepath}")
+    # 데이터셋 불러오기
+    testset = load_dataset("shangrilar/ko_text2sql", "origin")['test']
+    testset = testset.to_pandas()
+    # testset = testset[:5]
+    logging.info('column: %s', testset.keys())
 
-        # 평가를 위한 requests.jsonl 생성
-        prompts = make_requests_for_generation(df, directory=requests_path)
-        jobs = make_request_jobs(model, prompts)
+    if not Path(requests_path).exists():
+        Path(requests_path).mkdir(parents=True)
 
-        with open(requests_filepath, "w") as f:
-            for job in jobs:
-                json_string = json.dumps(job)
-                f.write(json_string + "\n")
+    # 평가를 위한 requests.jsonl 생성
+    prompts = make_requests_for_generation(testset)
+    jobs = make_request_jobs(model, prompts)
+    testset['prompt'] = prompts
+    testset['job'] = jobs
 
-        url = "https://api.openai.com/v1/chat/completions" if model.lower().startswith(
-            'gpt') else "http://172.16.15.112:11434/api/chat"
+    # with open(requests_filepath, "w") as f:
+    #     for job in jobs:
+    #         json_string = json.dumps(job)
+    #         f.write(json_string + "\n")
+    #
+    # url = "https://api.openai.com/v1/chat/completions" if model.lower().startswith(
+    #     'gpt') else "http://172.16.15.112:11434/api/chat"
+    #
+    # api_request_parallel_processor.process(
+    #     requests_filepath=requests_filepath,
+    #     save_filepath=save_filepath,
+    #     request_url=url,
+    #     max_requests_per_minute=2500,
+    #     max_tokens_per_minute=100000,
+    #     token_encoding_name="cl100k_base",
+    #     max_attempts=10,
+    #     logging_level=20
+    # )
 
-        api_request_parallel_processor.process(
-            requests_filepath=requests_filepath,
-            save_filepath=save_filepath,
-            request_url=url,
-            max_requests_per_minute=2500,
-            max_tokens_per_minute=100000,
-            token_encoding_name="cl100k_base",
-            max_attempts=10,
-            logging_level=20
-        )
+    url = "http://172.16.15.112:11434/api/chat"
 
-        prompts = []
-        responses = []
-        with open(save_filepath, 'r') as json_file:
-            for data in json_file:
-                json_data = json.loads(data)
+    responses = api_request_parallel_processor.process_in_memory(
+        dataset=testset,
+        request_url=url,
+        max_requests_per_minute=2500,
+        max_tokens_per_minute=100000,
+        token_encoding_name="cl100k_base",
+        max_attempts=10,
+        logging_level=20)
 
-                logging.info(f"json_data: {json_data}")
-                prompts.append(json_data[0]['messages'][0]['content'])
-                responses.append(json_data[1]['message']['content'])
 
-        dfs = pd.DataFrame({"prompt": prompts, "response": responses})
-
-        dfs.to_json(filepath, orient='records', lines=True)
-        logging.info(f"File saved: {filepath}")
-    else:
-        logging.info(f"File exists. Loading data file: {filepath}")
-        dfs = pd.read_json(filepath, lines=True)
-        logging.info("Colums: %s", dfs.keys())
-        logging.info("File loaded.")
+        # prompts = []
+        # responses = []
+        # with open(save_filepath, 'r') as json_file:
+        #     for data in json_file:
+        #         json_data = json.loads(data)
+        #
+        #         logging.info(f"json_data: {json_data}")
+        #         prompts.append(json_data[0]['messages'][0]['content'])
+        #         responses.append(json_data[1]['message']['content'])
+        #
+        # dfs = pd.DataFrame({"prompt": prompts, "response": responses})
+        #
+    responses.to_json(filepath, orient='records', lines=True)
+    logging.info(f"File saved: {filepath}")
+    # else:
+    #     logging.info(f"File exists. Loading data file: {filepath}")
+    #     dfs = pd.read_json(filepath, lines=True)
+    #     logging.info("Colums: %s", dfs.keys())
+    #     logging.info("File loaded.")
 
     # results_path = path.join(prefix, 'results')
     # save_filepath = path.join(results_path, f'{model}.sav')
@@ -398,4 +414,4 @@ def prepare_test_ollama(model, prefix=''):
     # logging.info('keys: %s', data.keys())
     # logging.info('data: %s', data)
 
-    return dfs
+    return responses
