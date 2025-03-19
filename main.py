@@ -15,7 +15,7 @@ logging.basicConfig(
 
 # main routine
 if __name__ == "__main__":
-    prefix = "20250318-http"
+    prefix = "20250319"
     datapath = path.join(prefix, 'data')
     check_and_create_directory(datapath)
 
@@ -59,13 +59,42 @@ if __name__ == "__main__":
             evaluation(finetuned_model, verifying_model, test_dataset, prefix)
 
         elif sys.argv[1] == 'ollama-api':
-            finetuned_model = "qwq"
+            # prefix = "20250319-qwq-27b"
+            # finetuned_model = "qwq"
+            finetuned_model = "gemma3:27b"
+            verifying_model = "gpt-4o-mini"
+            prefix = f"{prefix}_{finetuned_model.replace(':', '-')}_{verifying_model}"
+
+            # 병렬 처리 매개변수 설정
+            batch_size = 5  # 기본값: 한 번에 8개 요청 처리
+            max_concurrent = 10  # 기본값: 최대 16개 동시 요청
+            max_retries = 3  # 기본값: 최대 3회 재시도
+
+            logging.info(f"병렬 처리 설정: 배치 크기 {batch_size}, 최대 동시 요청 {max_concurrent}, 최대 재시도 {max_retries}")
+
+            # 명령줄 인자로 병렬 처리 매개변수 받기 (선택적)
+            if len(sys.argv) > 2:
+                batch_size = int(sys.argv[2])
+            if len(sys.argv) > 3:
+                max_concurrent = int(sys.argv[3])
+            if len(sys.argv) > 4:
+                max_retries = int(sys.argv[4])
+
             merge_model(base_model, finetuned_model, prefix)
-            test_dataset = aux_local.prepare_test_dataset(finetuned_model, prefix)
-            evaluation(finetuned_model, verifying_model, test_dataset, prefix)
+            test_dataset = aux_local.prepare_test_dataset(
+                finetuned_model,
+                prefix,
+                batch_size=batch_size,
+                max_concurrent=max_concurrent,
+                max_retries=max_retries
+            )
+            api_key = "crR2uHiE9awuVzimCtwmCXG6apq_rsPhHBBfjt1PSts4VmcZyLEwCJv3FFWqCD4hp20KGDL6oeT3BlbkFJBR4xBLE6TLPOwXaUdRiEgzqwE96hHs6xNKZTVXdWrEbxuqUHUZe3neqOYSrHghB8K3NOzVrXMA"
+            evaluation(finetuned_model, verifying_model, test_dataset, prefix, api_key=f"sk-proj-{api_key}")
 
         elif sys.argv[1] == 'ollama-http':
-            finetuned_model = "qwq"
+            finetuned_model = "gemma3:27b"
+            # verifying_model = ""
+            prefix = f"{prefix}-{finetuned_model.replace(':', '-')}"
             merge_model(base_model, finetuned_model, prefix)
             test_dataset = aux_local.prepare_test_ollama(finetuned_model, prefix)
             evaluation(finetuned_model, verifying_model, test_dataset, prefix)

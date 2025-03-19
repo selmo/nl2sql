@@ -5,7 +5,7 @@ import re
 
 from langchain_core.exceptions import OutputParserException
 
-import api_request_parallel_processor
+from api_request_parallel_processor import llm_invoke_parallel, process_in_memory
 from util_common import clean_filepath, check_and_create_directory
 from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field, model_validator
@@ -61,7 +61,7 @@ class SQL(BaseModel):
 
 
 def prepare_model_and_parser(model_id):
-    model = OllamaLLM(model=model_id, temperature=0.0)
+    model = OllamaLLM(model=model_id, temperature=0.0, base_url='172.16.15.112')
 
     # Set up a parser + inject instructions into the prompt template.
     parser = PydanticOutputParser(pydantic_object=SQL)
@@ -209,37 +209,175 @@ def make_request(model, prompts):
     return jobs
 
 
-def prepare_test_dataset(model, prefix=''):
+# def prepare_test_dataset(model, prefix=''):
+#     check_and_create_directory(prefix)
+#     filepath = path.join(prefix, "saved_results.jsonl")
+#
+#     if not Path(filepath).exists():
+#         logging.info(f"File not exists. Creating data file: {filepath}")
+#         # 데이터셋 불러오기
+#         df = load_dataset("shangrilar/ko_text2sql", "origin")['test']
+#         df = df.to_pandas()
+#         df = df[:50]
+#
+#         model, parser = prepare_model_and_parser(model)
+#
+#         for idx, row in df.iterrows():
+#             gen_sql = llm_invoke(model, row)
+#             cleaned_sql = clean_response(parser, gen_sql)
+#
+#             logging.info(f'cleaned sql #{idx}: {cleaned_sql.gen_sql}')
+#
+#             df.loc[idx, 'gen_sql'] = cleaned_sql.gen_sql
+#
+#         logging.info(f"Data Columns: {df.keys()}")
+#         logging.info(f"Data: {df}")
+#
+#         df.to_json(filepath, orient='records', lines=True)
+#         logging.info(f"File saved: {filepath}")
+#     else:
+#         logging.info(f"File exists. Loading data file: {filepath}")
+#         df = pd.read_json(filepath, lines=True)
+#         logging.info(f"Data Columns: {df.keys()}")
+#         logging.info(f"Data: {df}")
+#         logging.info("File loaded.")
+#
+#     return df
+
+
+def prepare_test_dataset_parallel(model, prefix=''):
+    """병렬 처리를 사용한 테스트 데이터셋 준비"""
     check_and_create_directory(prefix)
     filepath = path.join(prefix, "saved_results.jsonl")
 
     if not Path(filepath).exists():
-        logging.info(f"File not exists. Creating data file: {filepath}")
+        logging.info(f"파일이 존재하지 않습니다. 데이터 파일 생성 중: {filepath}")
+
+        # 데이터셋 불러오기
+        df = load_dataset("shangrilar/ko_text2sql", "origin")['test']
+        df = df.to_pandas()
+        df = df[:50]  # 필요한 경우 샘플 수 조정
+
+        # 프롬프트 목록 생성
+        prompts = []
+        for _, row in df.iterrows():
+            prompts.append(row)
+
+        # 결과 처리
+        parser = PydanticOutputParser(pydantic_object=SQL)
+
+        # 병렬 호출 실행
+        results = llm_invoke_parallel(model, prompts, template, parser)
+
+        for idx, result in enumerate(results):
+            try:
+                if 'message' in result and 'content' in result['message']:
+                    content = result['message']['content']
+                    cleaned_result = clean_response(parser, content)
+                    df.loc[idx, 'gen_sql'] = cleaned_result.gen_sql
+                elif 'error' in result:
+                    logging.error(f"오류 응답: {result['error']}")
+                    df.loc[idx, 'gen_sql'] = ''
+                else:
+                    logging.warning(f"예상치 못한 응답 형식: {result}")
+                    df.loc[idx, 'gen_sql'] = ''
+            except Exception as e:
+                logging.error(f"결과 처리 중 오류 발생: {str(e)}")
+                df.loc[idx, 'gen_sql'] = ''
+
+        # 결과 저장
+        df.to_json(filepath, orient='records', lines=True)
+        logging.info(f"파일 저장 완료: {filepath}")
+    else:
+        logging.info(f"파일이 존재합니다. 데이터 파일 로딩 중: {filepath}")
+        df = pd.read_json(filepath, lines=True)
+        logging.info(f"데이터 컬럼: {df.keys()}")
+        logging.info(f"데이터: {df}")
+        logging.info("파일 로딩 완료.")
+
+    return df
+
+
+def prepare_test_dataset(model, prefix='', batch_size=10, max_concurrent=10, max_retries=3):
+    """병렬 처리를 사용한 테스트 데이터셋 준비 (진행률 로깅 기능 추가)"""
+    check_and_create_directory(prefix)
+    filepath = path.join(prefix, "saved_results.jsonl")
+
+    # 로그 파일 설정
+    log_filepath = path.join(prefix, "parallel_processing.log")
+    file_handler = logging.FileHandler(log_filepath)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+    root_logger = logging.getLogger()
+    root_logger.addHandler(file_handler)
+    root_logger.setLevel(logging.INFO)
+
+    logging.info(f"병렬 처리 로그를 {log_filepath}에 기록합니다.")
+
+    if not Path(filepath).exists():
+        logging.info(f"파일이 존재하지 않습니다. 데이터 파일 생성 중: {filepath}")
+
         # 데이터셋 불러오기
         df = load_dataset("shangrilar/ko_text2sql", "origin")['test']
         df = df.to_pandas()
 
-        model, parser = prepare_model_and_parser(model)
+        # 모델과 파서 준비
+        parser = PydanticOutputParser(pydantic_object=SQL)
 
-        for idx, row in df.iterrows():
-            gen_sql = llm_invoke(model, row)
-            cleaned_sql = clean_response(parser, gen_sql)
+        # 프롬프트 목록 생성
+        prompts = []
+        for _, row in df.iterrows():
+            prompts.append(row)
 
-            logging.info(f'cleaned sql #{idx}: {cleaned_sql.gen_sql}')
+        # 병렬 호출 실행
+        logging.info(f"총 {len(prompts)}개 프롬프트에 대한 병렬 처리를 시작합니다.")
+        results = llm_invoke_parallel(
+            model,
+            prompts,
+            template,
+            parser,
+            batch_size=batch_size,
+            max_retries=max_retries,
+            max_concurrent=max_concurrent
+        )
 
-            df.loc[idx, 'gen_sql'] = cleaned_sql.gen_sql
+        # 결과 처리
+        success_count = 0
+        error_count = 0
 
-        logging.info(f"Data Columns: {df.keys()}")
-        logging.info(f"Data: {df}")
+        for idx, result in enumerate(results):
+            try:
+                if result and 'message' in result and 'content' in result['message']:
+                    content = result['message']['content']
+                    cleaned_result = clean_response(parser, content)
+                    df.loc[idx, 'gen_sql'] = cleaned_result.gen_sql
+                    success_count += 1
+                elif result and 'error' in result:
+                    logging.error(f"오류 응답 (인덱스 {idx}): {result['error']}")
+                    df.loc[idx, 'gen_sql'] = ''
+                    error_count += 1
+                else:
+                    logging.warning(f"예상치 못한 응답 형식 (인덱스 {idx}): {result}")
+                    df.loc[idx, 'gen_sql'] = ''
+                    error_count += 1
+            except Exception as e:
+                logging.error(f"결과 처리 중 오류 발생 (인덱스 {idx}): {str(e)}")
+                df.loc[idx, 'gen_sql'] = ''
+                error_count += 1
 
+        logging.info(f"결과 처리 완료: 성공 {success_count}개, 오류 {error_count}개")
+
+        # 결과 저장
         df.to_json(filepath, orient='records', lines=True)
-        logging.info(f"File saved: {filepath}")
+        logging.info(f"파일 저장 완료: {filepath}")
     else:
-        logging.info(f"File exists. Loading data file: {filepath}")
+        logging.info(f"파일이 존재합니다. 데이터 파일 로딩 중: {filepath}")
         df = pd.read_json(filepath, lines=True)
-        logging.info(f"Data Columns: {df.keys()}")
-        logging.info(f"Data: {df}")
-        logging.info("File loaded.")
+        logging.info(f"데이터 컬럼: {df.keys()}")
+        logging.info("파일 로딩 완료.")
+
+    # 로그 핸들러 제거
+    root_logger.removeHandler(file_handler)
 
     return df
 
@@ -330,82 +468,53 @@ def prepare_test_ollama(model, prefix=''):
     check_and_create_directory(prefix)
     filepath = path.join(prefix, "saved_results.jsonl")
 
-    # if not Path(filepath).exists():
-    requests_path = path.join(prefix, 'requests')
-    results_path = path.join(prefix, 'results')
-    requests_filepath = clean_filepath(f'{model}.req', prefix=requests_path)
-    save_filepath = clean_filepath(f'{model}.sav', prefix=results_path)
-    output_file = clean_filepath(f"{model}.csv", prefix=results_path)
-    check_and_create_directory(path.dirname(requests_filepath))
-    check_and_create_directory(path.dirname(save_filepath))
-    check_and_create_directory(path.dirname(output_file))
+    if not Path(filepath).exists():
+        requests_path = path.join(prefix, 'requests')
+        results_path = path.join(prefix, 'results')
+        requests_filepath = clean_filepath(f'{model}.req', prefix=requests_path)
+        save_filepath = clean_filepath(f'{model}.sav', prefix=results_path)
+        output_file = clean_filepath(f"{model}.csv", prefix=results_path)
+        check_and_create_directory(path.dirname(requests_filepath))
+        check_and_create_directory(path.dirname(save_filepath))
+        check_and_create_directory(path.dirname(output_file))
 
-    logging.info(f"File not exists. Creating data file: {filepath}")
-    # 데이터셋 불러오기
-    testset = load_dataset("shangrilar/ko_text2sql", "origin")['test']
-    testset = testset.to_pandas()
-    # testset = testset[:5]
-    logging.info('column: %s', testset.keys())
+        logging.info(f"File not exists. Creating data file: {filepath}")
+        # 데이터셋 불러오기
+        testset = load_dataset("shangrilar/ko_text2sql", "origin")['test']
+        testset = testset.to_pandas()
+        # testset = testset[:5]
+        logging.info('column: %s', testset.keys())
 
-    if not Path(requests_path).exists():
-        Path(requests_path).mkdir(parents=True)
+        if not Path(requests_path).exists():
+            Path(requests_path).mkdir(parents=True)
 
-    # 평가를 위한 requests.jsonl 생성
-    prompts = make_requests_for_generation(testset)
-    jobs = make_request_jobs(model, prompts)
-    testset['prompt'] = prompts
-    testset['job'] = jobs
+        # 평가를 위한 requests.jsonl 생성
+        prompts = make_requests_for_generation(testset)
+        jobs = make_request_jobs(model, prompts)
+        testset['prompt'] = prompts
+        testset['job'] = jobs
 
-    # with open(requests_filepath, "w") as f:
-    #     for job in jobs:
-    #         json_string = json.dumps(job)
-    #         f.write(json_string + "\n")
-    #
-    # url = "https://api.openai.com/v1/chat/completions" if model.lower().startswith(
-    #     'gpt') else "http://172.16.15.112:11434/api/chat"
-    #
-    # api_request_parallel_processor.process(
-    #     requests_filepath=requests_filepath,
-    #     save_filepath=save_filepath,
-    #     request_url=url,
-    #     max_requests_per_minute=2500,
-    #     max_tokens_per_minute=100000,
-    #     token_encoding_name="cl100k_base",
-    #     max_attempts=10,
-    #     logging_level=20
-    # )
+        url = "http://172.16.15.112:11434/api/chat"
 
-    url = "http://172.16.15.112:11434/api/chat"
+        responses = process_in_memory(
+            dataset=testset,
+            request_url=url,
+            max_requests_per_minute=50,
+            max_tokens_per_minute=100000,
+            token_encoding_name="cl100k_base",
+            max_attempts=10,
+            logging_level=20,
+            max_concurrent_requests=10,
+            request_timeout=None,
+            overall_timeout=None)
 
-    responses = api_request_parallel_processor.process_in_memory(
-        dataset=testset,
-        request_url=url,
-        max_requests_per_minute=2500,
-        max_tokens_per_minute=100000,
-        token_encoding_name="cl100k_base",
-        max_attempts=10,
-        logging_level=20)
-
-
-        # prompts = []
-        # responses = []
-        # with open(save_filepath, 'r') as json_file:
-        #     for data in json_file:
-        #         json_data = json.loads(data)
-        #
-        #         logging.info(f"json_data: {json_data}")
-        #         prompts.append(json_data[0]['messages'][0]['content'])
-        #         responses.append(json_data[1]['message']['content'])
-        #
-        # dfs = pd.DataFrame({"prompt": prompts, "response": responses})
-        #
-    responses.to_json(filepath, orient='records', lines=True)
-    logging.info(f"File saved: {filepath}")
-    # else:
-    #     logging.info(f"File exists. Loading data file: {filepath}")
-    #     dfs = pd.read_json(filepath, lines=True)
-    #     logging.info("Colums: %s", dfs.keys())
-    #     logging.info("File loaded.")
+        responses.to_json(filepath, orient='records', lines=True)
+        logging.info(f"File saved: {filepath}")
+    else:
+        logging.info(f"File exists. Loading data file: {filepath}")
+        responses = pd.read_json(filepath, lines=True)
+        logging.info("Colums: %s", responses.keys())
+        logging.info("File loaded.")
 
     # results_path = path.join(prefix, 'results')
     # save_filepath = path.join(results_path, f'{model}.sav')
@@ -415,3 +524,4 @@ def prepare_test_ollama(model, prefix=''):
     # logging.info('data: %s', data)
 
     return responses
+

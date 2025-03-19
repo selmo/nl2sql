@@ -137,7 +137,7 @@ def merge_model(base_model, finetuned_model, prefix=''):
         tokenizer.save_pretrained(filepath)
 
 
-def evaluation(ft_model, verifying_model, dataset, prefix):
+def evaluation(ft_model, verifying_model, dataset, prefix, api_key=""):
     eval_filepath = "text2sql.jsonl"
 
     logging.info("DataFrame:\n%s", dataset)
@@ -169,6 +169,7 @@ def evaluation(ft_model, verifying_model, dataset, prefix):
         requests_filepath=requests_filepath,
         save_filepath=save_filepath,
         request_url=url,
+        api_key=api_key,
         max_requests_per_minute=2500,
         max_tokens_per_minute=100000,
         token_encoding_name="cl100k_base",
