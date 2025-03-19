@@ -19,7 +19,7 @@ def clean_filepath(filepath, prefix=''):
 
 
 def make_request_jobs(model, prompts):
-    if model.startswith('gpt'):
+    if model.startswith('gpt') or model.startswith('o1') or model.startswith('o3'):
         jobs = [{"model": model,
                  "response_format": {
                      "type": "json_object"

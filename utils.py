@@ -19,9 +19,9 @@ def change_jsonl_to_csv(input_file, output_file='', prompt_column="prompt", resp
         for data in json_file:
             json_data = json.loads(data)
 
-            logging.info(f"json_data: {json_data}")
+            logging.debug(f"json_data: {json_data}")
             prompts.append(json_data[0]['messages'][0]['content'])
-            if model.lower().startswith('gpt'):
+            if model.lower().startswith('gpt') or model.startswith('o1') or model.startswith('o3'):
                 responses.append(json_data[1]['choices'][0]['message']['content'])
             else:
                 responses.append(json_data[1]['message']['content'])

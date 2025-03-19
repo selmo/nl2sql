@@ -1272,6 +1272,8 @@ def llm_invoke_parallel(model, prompts, template, parser, batch_size=10, max_ret
     """병렬 처리를 위한 래퍼 함수 (로깅 기능 추가)"""
     logging.info(f"병렬 처리 시작: 총 {len(prompts)}개 요청 (배치 크기: {batch_size}, 최대 동시 요청: {max_concurrent})")
 
+    start_time = time.time()
+
     loop = asyncio.get_event_loop()
     results = loop.run_until_complete(
         llm_invoke_batch(
@@ -1285,7 +1287,11 @@ def llm_invoke_parallel(model, prompts, template, parser, batch_size=10, max_ret
         )
     )
 
+    elapsed_time = time.time() - start_time
+
     logging.info(f"병렬 처리 완료: {len(results)}개 응답 수신")
+    logging.info(f"평균 요청 처리 시간: {elapsed_time / len(prompts)}초")
+
     return results
 
 

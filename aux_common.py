@@ -95,8 +95,8 @@ def prepare_test_dataset(model, prefix=''):
 
 
 def merge_model(base_model, finetuned_model, prefix=''):
-    if base_model == '':
-        return
+    if finetuned_model == '':
+        return base_model, f"{prefix}_{base_model.replace(':', '-')}"
 
     filepath = path.join(prefix, finetuned_model)
 
@@ -136,6 +136,8 @@ def merge_model(base_model, finetuned_model, prefix=''):
         model.save_pretrained(filepath)
         tokenizer.save_pretrained(filepath)
 
+    return finetuned_model, f"{prefix}_{finetuned_model.replace(':', '-')}"
+
 
 def evaluation(ft_model, verifying_model, dataset, prefix, api_key=""):
     eval_filepath = "text2sql.jsonl"
@@ -163,8 +165,9 @@ def evaluation(ft_model, verifying_model, dataset, prefix, api_key=""):
             f.write(json_string + "\n")
 
     url = "https://api.openai.com/v1/chat/completions" if verifying_model.lower().startswith(
-        'gpt') else "http://172.16.15.112:11434/api/chat"
+        'gpt') or verifying_model.startswith('o1') or verifying_model.startswith('o3') else "http://172.16.15.112:11434/api/chat"
 
+    logging.info('URL: %s', url)
     api_request_parallel_processor.process_by_file(
         requests_filepath=requests_filepath,
         save_filepath=save_filepath,

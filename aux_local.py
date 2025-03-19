@@ -108,12 +108,12 @@ def clean_response(parser, response):
     clean_output = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
     try:
         result = parser.parse(clean_output)
-        logging.info("result: %s\n", result)
+        logging.debug("result: %s\n", result)
         return result
     except OutputParserException as e:
         logging.error("response: %s", clean_output)
         query_match = extract_sql_queries(clean_output)
-        logging.info("query: %s", query_match)
+        logging.error("query: %s", query_match)
         sql_obj = SQL(
             reasoning="",
             description="Parsing error.",
@@ -207,42 +207,6 @@ def make_request(model, prompts):
                  } for prompt in prompts
                 ]
     return jobs
-
-
-# def prepare_test_dataset(model, prefix=''):
-#     check_and_create_directory(prefix)
-#     filepath = path.join(prefix, "saved_results.jsonl")
-#
-#     if not Path(filepath).exists():
-#         logging.info(f"File not exists. Creating data file: {filepath}")
-#         # 데이터셋 불러오기
-#         df = load_dataset("shangrilar/ko_text2sql", "origin")['test']
-#         df = df.to_pandas()
-#         df = df[:50]
-#
-#         model, parser = prepare_model_and_parser(model)
-#
-#         for idx, row in df.iterrows():
-#             gen_sql = llm_invoke(model, row)
-#             cleaned_sql = clean_response(parser, gen_sql)
-#
-#             logging.info(f'cleaned sql #{idx}: {cleaned_sql.gen_sql}')
-#
-#             df.loc[idx, 'gen_sql'] = cleaned_sql.gen_sql
-#
-#         logging.info(f"Data Columns: {df.keys()}")
-#         logging.info(f"Data: {df}")
-#
-#         df.to_json(filepath, orient='records', lines=True)
-#         logging.info(f"File saved: {filepath}")
-#     else:
-#         logging.info(f"File exists. Loading data file: {filepath}")
-#         df = pd.read_json(filepath, lines=True)
-#         logging.info(f"Data Columns: {df.keys()}")
-#         logging.info(f"Data: {df}")
-#         logging.info("File loaded.")
-#
-#     return df
 
 
 def prepare_test_dataset_parallel(model, prefix=''):

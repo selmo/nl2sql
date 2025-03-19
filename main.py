@@ -1,9 +1,12 @@
+import time
+import argparse
 import aux_local
 import logging
 import sys
 import os.path as path
 
 from aux_common import prepare_train_dataset, prepare_test_dataset, merge_model, evaluation
+from timing_stats import timing_stats_manager, log_timing_stats
 from util_common import check_and_create_directory, autotrain
 from utils import load_csv
 
@@ -13,98 +16,212 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description='모델 학습 및 평가 도구')
+
+    # 공통 인수
+    parser.add_argument('command', choices=['train', 'test', 'eval', 'ollama-api', 'ollama-http', 'eval-csv'],
+                        help='실행할 명령 (train, test, eval, ollama-api, ollama-http, eval-csv)')
+    parser.add_argument('--prefix', type=str, default=".",
+                        help='실행 데이터 디렉토리 접두사')
+    parser.add_argument('--base-model', type=str, default='qwq',
+                        help='기본 모델 이름')
+    parser.add_argument('--finetuned-model', type=str, default="",
+                        help='파인튜닝된 모델 이름')
+    parser.add_argument('--verifying-model', type=str, default="deepseek-r1:70b",
+                        help='검증용 모델 이름 (기본값: deepseek-r1:70b)')
+
+    # ollama-api 명령에 대한 추가 인수
+    parser.add_argument('--batch-size', type=int, default=10,
+                        help='배치 크기 (ollama-api 명령 시 사용, 기본값: 10)')
+    parser.add_argument('--max-concurrent', type=int, default=10,
+                        help='최대 동시 요청 수 (ollama-api 명령 시 사용, 기본값: 10)')
+    parser.add_argument('--max-retries', type=int, default=3,
+                        help='최대 재시도 횟수 (ollama-api 명령 시 사용, 기본값: 3)')
+
+    # eval-csv 명령에 대한 추가 인수
+    parser.add_argument('--csv-path', type=str, help='평가할 CSV 파일 경로 (eval-csv 명령 시 필수)')
+
+    return parser.parse_args()
+
 # main routine
 if __name__ == "__main__":
-    prefix = "20250319"
+    args = parse_arguments()
+
+    prefix = args.prefix
     datapath = path.join(prefix, 'data')
     check_and_create_directory(datapath)
 
-    # base_model = 'defog/sqlcoder-7b-2'
-    # finetuned_model = "sqlcoder-finetuned"
-    verifying_model = "deepseek-r1:70b"  # "llama3.3:70b"
-    base_model = ''  # 'qwq'
-    finetuned_model = "Qwen/QwQ-32B-AWQ"  # "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
+    # # base_model = 'defog/sqlcoder-7b-2'
+    # # finetuned_model = "sqlcoder-finetuned"
+    # verifying_model = "deepseek-r1:70b"  # "llama3.3:70b"
+    # base_model = ''  # 'qwq'
+    # finetuned_model = "Qwen/QwQ-32B-AWQ"  # "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
 
-    if len(sys.argv) > 1:
-        if sys.argv[1] == 'train':
-            prepare_train_dataset(prefix)
-            autotrain(
-                base_model,
-                finetuned_model,
-                data_path=path.join(prefix, 'data'),
-                text_column='text',
-                lr=2e-4,
-                batch_size=14,
-                gradient_accumulation=5,
-                block_size=1024,
-                warmup_ratio=0.1,
-                epochs=5,
-                lora_r=16,
-                lora_alpha=32,
-                # epochs=1,
-                # lora_r=8,
-                # lora_alpha=16,
-                lora_dropout=0.05,
-                weight_decay=0.01,
-                mixed_precision='fp16',
-                peft=True,
-                quantization='int4',
-                trainer='sft',
-            )
+    base_model = args.base_model
+    finetuned_model = args.finetuned_model
+    verifying_model = args.verifying_model
 
-        elif sys.argv[1] == 'test' or sys.argv[1] == 'eval':
-            # finetuned_model = "LGAI-EXAONE/EXAONE-Deep-32B-AWQ"
-            merge_model(base_model, finetuned_model, prefix)
-            test_dataset = prepare_test_dataset(finetuned_model, prefix)
-            evaluation(finetuned_model, verifying_model, test_dataset, prefix)
+    program_start_time = time.time()
+    timing_stats_manager.start_process("main")
 
-        elif sys.argv[1] == 'ollama-api':
-            # prefix = "20250319-qwq-27b"
-            # finetuned_model = "qwq"
-            finetuned_model = "gemma3:27b"
-            verifying_model = "gpt-4o-mini"
-            prefix = f"{prefix}_{finetuned_model.replace(':', '-')}_{verifying_model}"
+    command_start_time = time.time()
+    timing_stats_manager.start_process(f"command_{args.command}", "main")
 
-            # 병렬 처리 매개변수 설정
-            batch_size = 5  # 기본값: 한 번에 8개 요청 처리
-            max_concurrent = 10  # 기본값: 최대 16개 동시 요청
-            max_retries = 3  # 기본값: 최대 3회 재시도
+    if args.command == 'train':
+        timing_stats_manager.start_process("prepare_train_dataset", f"command_{args.command}")
+        prepare_train_dataset(prefix)
+        timing_stats_manager.stop_process("prepare_train_dataset")
 
-            logging.info(f"병렬 처리 설정: 배치 크기 {batch_size}, 최대 동시 요청 {max_concurrent}, 최대 재시도 {max_retries}")
+        # 모델 학습 시간 측정
+        timing_stats_manager.start_process("autotrain", f"command_{sys.argv[1]}")
+        autotrain(
+            base_model,
+            finetuned_model,
+            data_path=path.join(prefix, 'data'),
+            text_column='text',
+            lr=2e-4,
+            batch_size=14,
+            gradient_accumulation=5,
+            block_size=1024,
+            warmup_ratio=0.1,
+            epochs=5,
+            lora_r=16,
+            lora_alpha=32,
+            # epochs=1,
+            # lora_r=8,
+            # lora_alpha=16,
+            lora_dropout=0.05,
+            weight_decay=0.01,
+            mixed_precision='fp16',
+            peft=True,
+            quantization='int4',
+            trainer='sft',
+        )
+        timing_stats_manager.stop_process("autotrain")
 
-            # 명령줄 인자로 병렬 처리 매개변수 받기 (선택적)
-            if len(sys.argv) > 2:
-                batch_size = int(sys.argv[2])
-            if len(sys.argv) > 3:
-                max_concurrent = int(sys.argv[3])
-            if len(sys.argv) > 4:
-                max_retries = int(sys.argv[4])
+    elif args.command == 'test' or args.command == 'eval':
+        # finetuned_model = "LGAI-EXAONE/EXAONE-Deep-32B-AWQ"
+        # 모델 병합 시간 측정
+        timing_stats_manager.start_process("merge_model", f"command_{args.command}")
+        merge_model(base_model, finetuned_model, prefix)
+        timing_stats_manager.stop_process("merge_model")
 
-            merge_model(base_model, finetuned_model, prefix)
-            test_dataset = aux_local.prepare_test_dataset(
-                finetuned_model,
-                prefix,
-                batch_size=batch_size,
-                max_concurrent=max_concurrent,
-                max_retries=max_retries
-            )
-            api_key = "crR2uHiE9awuVzimCtwmCXG6apq_rsPhHBBfjt1PSts4VmcZyLEwCJv3FFWqCD4hp20KGDL6oeT3BlbkFJBR4xBLE6TLPOwXaUdRiEgzqwE96hHs6xNKZTVXdWrEbxuqUHUZe3neqOYSrHghB8K3NOzVrXMA"
-            evaluation(finetuned_model, verifying_model, test_dataset, prefix, api_key=f"sk-proj-{api_key}")
+        # 테스트 데이터셋 준비 시간 측정
+        timing_stats_manager.start_process("prepare_test_dataset", f"command_{args.command}")
+        test_dataset = prepare_test_dataset(finetuned_model, prefix)
+        prepare_time = timing_stats_manager.stop_process("prepare_test_dataset")
+        logging.info(f"테스트 데이터셋 준비 완료: {prepare_time:.2f}초 소요")
 
-        elif sys.argv[1] == 'ollama-http':
-            finetuned_model = "gemma3:27b"
-            # verifying_model = ""
-            prefix = f"{prefix}-{finetuned_model.replace(':', '-')}"
-            merge_model(base_model, finetuned_model, prefix)
-            test_dataset = aux_local.prepare_test_ollama(finetuned_model, prefix)
-            evaluation(finetuned_model, verifying_model, test_dataset, prefix)
+        # 평가 시간 측정
+        timing_stats_manager.start_process("evaluation", f"command_{args.command}")
+        evaluation(finetuned_model, verifying_model, test_dataset, prefix)
+        eval_time = timing_stats_manager.stop_process("evaluation")
+        logging.info(f"평가 완료: {eval_time:.2f}초 소요")
 
-        elif sys.argv[1] == 'eval-csv':
-            base_eval = load_csv(sys.argv[2])
-            num_correct_answers = base_eval.query("resolve_yn == 'yes'").shape[0]
+    elif args.command == 'ollama-api':
+        # # prefix = "20250319-qwq-27b"
+        # finetuned_model = "qwq"
+        # # finetuned_model = "gemma3:27b"
+        #
+        # # verifying_model = "gpt-4o-mini"
+        # verifying_model = "llama3.3:70b"
+        # # verifying_model = "deepseek-r1:70b"
 
-            logging.info("Evaluation CSV:\n%s", base_eval)
-            logging.info("Number of correct answers: %s", num_correct_answers)
+        # 병렬 처리 매개변수 설정
+        batch_size = args.batch_size
+        max_concurrent = args.max_concurrent
+        max_retries = args.max_retries
 
-        else:
-            print('Arg:\n\ttrain: Finetuning model\n\ttest|eval: Evaluation model')
+        logging.info(f"병렬 처리 설정: 배치 크기 {batch_size}, 최대 동시 요청 {max_concurrent}, 최대 재시도 {max_retries}")
+
+        # 모델 병합 시간 측정
+        timing_stats_manager.start_process("merge_model", f"command_{args.command}")
+        model_id, model_prefix = merge_model(base_model, finetuned_model, prefix)
+        merge_time = timing_stats_manager.stop_process("merge_model")
+        logging.info(f"모델 병합 완료: {merge_time:.2f}초 소요")
+
+        # 테스트 데이터셋 준비 시간 측정 (병렬 처리)
+        timing_stats_manager.start_process("prepare_test_dataset", f"command_{args.command}")
+        test_dataset = aux_local.prepare_test_dataset(
+            model_id,
+            model_prefix,
+            batch_size=batch_size,
+            max_concurrent=max_concurrent,
+            max_retries=max_retries
+        )
+        prepare_time = timing_stats_manager.stop_process("prepare_test_dataset")
+        logging.info(f"테스트 데이터셋 준비 완료: {prepare_time:.2f}초 소요")
+
+        # 평가 시간 측정
+        timing_stats_manager.start_process("evaluation", f"command_{args.command}")
+        result_prefix = f"{prefix}_{model_id.replace(':', '-')}_{verifying_model.replace(':', '-')}"
+        # evaluation(model_id, verifying_model, test_dataset, result_prefix)
+        api_key = "crR2uHiE9awuVzimCtwmCXG6apq_rsPhHBBfjt1PSts4VmcZyLEwCJv3FFWqCD4hp20KGDL6oeT3BlbkFJBR4xBLE6TLPOwXaUdRiEgzqwE96hHs6xNKZTVXdWrEbxuqUHUZe3neqOYSrHghB8K3NOzVrXMA"
+        evaluation(model_id, verifying_model, test_dataset, prefix, api_key=f"sk-proj-{api_key}")
+        eval_time = timing_stats_manager.stop_process("evaluation")
+        logging.info(f"평가 완료: {eval_time:.2f}초 소요")
+
+    elif args.command == 'ollama-http':
+        # finetuned_model = "gemma3:27b"
+        # verifying_model = ""
+        # prefix = f"{prefix}_{finetuned_model.replace(':', '-')}_{verifying_model}"
+
+        # 모델 병합 시간 측정
+        timing_stats_manager.start_process("merge_model", f"command_{args.command}")
+        model_id, model_prefix = merge_model(base_model, finetuned_model, prefix)
+        merge_time = timing_stats_manager.stop_process("merge_model")
+        logging.info(f"모델 병합 완료: {merge_time:.2f}초 소요")
+
+        # HTTP 테스트 준비 시간 측정
+        timing_stats_manager.start_process("prepare_test_ollama", f"command_{args.command}")
+        test_dataset = aux_local.prepare_test_ollama(model_id, model_prefix)
+        prepare_time = timing_stats_manager.stop_process("prepare_test_ollama")
+        logging.info(f"HTTP 테스트 준비 완료: {prepare_time:.2f}초 소요")
+
+        # 평가 시간 측정
+        timing_stats_manager.start_process("evaluation", f"command_{args.command}")
+        result_prefix = f"{prefix}_{model_id.replace(':', '-')}_{verifying_model.replace(':', '-')}"
+        evaluation(model_id, verifying_model, test_dataset, result_prefix)
+        eval_time = timing_stats_manager.stop_process("evaluation")
+        logging.info(f"평가 완료: {eval_time:.2f}초 소요")
+
+    elif args.command == 'eval-csv':
+        if not args.csv_path:
+            logging.error("eval-csv 명령에는 --csv-path 인수가 필요합니다")
+            sys.exit(1)
+
+        # CSV 로딩 시간 측정
+        timing_stats_manager.start_process("load_csv", f"command_{args.command}")
+        base_eval = load_csv(args.csv_path)
+        load_time = timing_stats_manager.stop_process("load_csv")
+        logging.info(f"CSV 로딩 완료: {load_time:.2f}초 소요")
+
+        # 평가 분석 시간 측정
+        timing_stats_manager.start_process("analyze_results", f"command_{args.command}")
+        num_correct_answers = base_eval.query("resolve_yn == 'yes'").shape[0]
+        analyze_time = timing_stats_manager.stop_process("analyze_results")
+
+        logging.info("Evaluation CSV:\n%s", base_eval)
+        logging.info("Number of correct answers: %s", num_correct_answers)
+        logging.info(f"결과 분석 완료: {analyze_time:.2f}초 소요")
+
+    else:
+        print('사용 가능한 명령: train, test, eval, ollama-api, ollama-http, eval-csv')
+        sys.exit(1)
+
+    # 명령어 실행 종료 및 시간 측정
+    command_end_time = time.time()
+    command_elapsed = command_end_time - command_start_time
+    timing_stats_manager.stop_process(f"command_{args.command}")
+    logging.info(f"명령어 '{args.command}' 실행 완료: {command_elapsed:.2f}초 소요")
+
+    # 전체 실행 시간 측정 종료
+    program_end_time = time.time()
+    program_elapsed = program_end_time - program_start_time
+    timing_stats_manager.stop_process("main")
+
+    # 전체 시간 통계 출력
+    logging.info(f"프로그램 실행 완료: 총 {program_elapsed:.2f}초 소요")
+    log_timing_stats()
