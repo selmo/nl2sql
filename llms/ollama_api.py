@@ -149,7 +149,7 @@ def llm_invoke_parallel(model, datasets, batch_size=10, max_retries=3, max_concu
         llm_invoke_batch(
             datasets,
             model,
-            "http://172.16.15.112:11434/api/generate",
+            "http://172.16.15.109:11434/api/generate",
             batch_size=batch_size,
             max_retries=max_retries,
             max_concurrent=max_concurrent
