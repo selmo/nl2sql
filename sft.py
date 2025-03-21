@@ -7,7 +7,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from trl import SFTConfig, SFTTrainer, DataCollatorForCompletionOnlyLM
 
 import os
-import utils
+import llms
 
 
 # from codecarbon import EmissionsTracker
@@ -254,7 +254,7 @@ if __name__ == "__main__":
 # df = load_dataset("shangrilar/ko_text2sql", "origin")
 # df = df.to_pandas()
 # for idx, row in df.iterrows():
-#     prompt = utils.make_prompt(row['context'], row['question'])
+#     prompt = llms.make_prompt(row['context'], row['question'])
 #     df.loc[idx, 'prompt'] = prompt
 # # sql 생성
 # gen_sqls = hf_pipe(

@@ -1,14 +1,14 @@
-import json
 import pandas as pd
 import logging
 import re
 
-from langchain_core.exceptions import OutputParserException
-
-from api_request_parallel_processor import llm_invoke_parallel, process_in_memory
+from api_request_parallel_processor import process_in_memory, llm_invoke_parallel_langchain
+from llms import prompt_generator
+from llms.ollama_api import llm_invoke_parallel
+from llms.prompt_generator import sql_parser, SQL
+from llms.response_processor import make_result, clean_response
 from util_common import clean_filepath, check_and_create_directory
 from langchain_core.output_parsers import PydanticOutputParser
-from pydantic import BaseModel, Field, model_validator
 
 from datasets import load_dataset
 from langchain_core.prompts import PromptTemplate
@@ -22,58 +22,17 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 
-# template = """
-# ### Task
-# Generate a SQL query to answer.
-# {format_instructions}
-# [QUESTION]{request}[/QUESTION]
-#
-# ### Database Schema
-# The query will run on a database with the following schema:
-# {ddl}
-#
-# ### Answer
-# Given the database schema, here is the SQL query that [QUESTION]{request}[/QUESTION]
-# [SQL]
-# {sql}"""
-template = """\
-You are a helpful language model. Please follow these rules:
-1. Output must be valid JSON, matching the schema below exactly (no extra text outside the JSON).
-2. Put your chain-of-thought or reasoning in the "reasoning" field. 
-3. Provide a short high-level description in the "description" field.
-4. Provide the final SQL in the "sql" field.
-
-{format_instructions}
-
-The user request is: "{request}"
-The database schema is:
-{ddl}
-
-Now provide your answer strictly in the JSON format (no extra text!):
-SQL to resolve the question: "{sql}"
-"""
-
-
-class SQL(BaseModel):
-    reasoning: str = Field(description="your chain-of-thought or reasoning")
-    description: str = Field(description="a short high-level description")
-    gen_sql: str = Field(description="the final SQL")
-
-
-def prepare_model_and_parser(model_id):
+def prepare_model(model_id):
     model = OllamaLLM(model=model_id, temperature=0.0, base_url='172.16.15.112')
 
-    # Set up a parser + inject instructions into the prompt template.
-    parser = PydanticOutputParser(pydantic_object=SQL)
-
     prompt = PromptTemplate(
-        template=template,
+        template=prompt_generator.template,
         input_variables=["request", "ddl", "sql"],
-        partial_variables={"format_instructions": parser.get_format_instructions()},
+        partial_variables={"format_instructions": sql_parser.get_format_instructions()},
     )
     chain = prompt | model
 
-    return chain, parser
+    return chain
 
 
 def llm_invoke(model, prompt):
@@ -82,45 +41,6 @@ def llm_invoke(model, prompt):
     # logging.info("response: %s", output)
 
     return output
-
-
-def extract_sql_queries(text: str) -> str:
-    # 1) ```sql ... ``` 패턴
-    pattern_triple_backticks = re.compile(r"```sql\s*(.*?)\s*```", re.DOTALL)
-
-    # 2) \boxed{ ... } 패턴
-    pattern_boxed = re.compile(r"\\boxed\s*\{\s*(.*?)\s*\}", re.DOTALL)
-
-    # (1) triple backticks 안의 SQL 추출
-    matches_backticks = pattern_triple_backticks.findall(text)
-    if matches_backticks:
-        return matches_backticks[0].strip()
-
-    # (2) \boxed 안의 SQL 추출
-    matches_boxed = pattern_boxed.findall(text)
-    if matches_boxed:
-        return matches_boxed[0].strip()
-
-    return ""
-
-
-def clean_response(parser, response):
-    clean_output = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
-    try:
-        result = parser.parse(clean_output)
-        logging.debug("result: %s\n", result)
-        return result
-    except OutputParserException as e:
-        logging.error("response: %s", clean_output)
-        query_match = extract_sql_queries(clean_output)
-        logging.error("query: %s", query_match)
-        sql_obj = SQL(
-            reasoning="",
-            description="Parsing error.",
-            gen_sql=query_match
-        )
-        logging.error("error msg: %s\n", e)
-        return sql_obj
 
 
 def prepare_dataset(model, parser, messages):
@@ -138,131 +58,96 @@ def prepare_dataset(model, parser, messages):
     return results
 
 
-def prepare_dataset_test(model):
-    model = OllamaLLM(model=model, temperature=0.0)
-
-    # Define your desired data structure.
-    class Joke(BaseModel):
-        setup: str = Field(description="question to set up a joke")
-        punchline: str = Field(description="answer to resolve the joke")
-
-        # You can add custom validation logic easily with Pydantic.
-        @model_validator(mode="before")
-        @classmethod
-        def question_ends_with_question_mark(cls, values: dict) -> dict:
-            setup = values.get("setup")
-            if setup and setup[-1] != "?":
-                raise ValueError("Badly formed question!")
-            return values
-
-    # Set up a parser + inject instructions into the prompt template.
-    parser = PydanticOutputParser(pydantic_object=Joke)
-
-    prompt = PromptTemplate(
-        template="Answer the user query.\n{format_instructions}\n{query}\n",
-        input_variables=["query"],
-        partial_variables={"format_instructions": parser.get_format_instructions()},
-    )
-
-    logging.info('prompt: %s', parser.get_format_instructions())
-
-    # And a query intended to prompt a language model to populate the data structure.
-    prompt_and_model = prompt | model
-    output = prompt_and_model.invoke({"query": "Tell me a joke."})
-    logging.info('output: %s', output)
-    result = parser.invoke(output)
-    logging.info('result: %s', result)
-
-
-def make_request(model, prompts):
-    if model.startswith('gpt'):
-        jobs = [{"model": model,
-                 "response_format": {
-                     "type": "json_object"
-                 },
-                 "messages": [
-                     {"role": "system",
-                      "content": prompt}
-                 ]
-                 } for prompt in prompts
-                ]
-    else:
-        jobs = [{"model": model,
-                 "stream": False,
-                 "messages": [
-                     {"role": "system",
-                      "content": prompt}
-                 ],
-                 "format": {
-                     "type": "object",
-                     "properties": {
-                         "sql": {
-                             "type": "string"
-                         }
-                     },
-                     "required": [
-                         "sql"
-                     ]
-                 }
-                 } for prompt in prompts
-                ]
-    return jobs
+# def prepare_dataset_test(model):
+#     model = OllamaLLM(model=model, temperature=0.0)
+#
+#     # Define your desired data structure.
+#     class Joke(BaseModel):
+#         setup: str = Field(description="question to set up a joke")
+#         punchline: str = Field(description="answer to resolve the joke")
+#
+#         # You can add custom validation logic easily with Pydantic.
+#         @model_validator(mode="before")
+#         @classmethod
+#         def question_ends_with_question_mark(cls, values: dict) -> dict:
+#             setup = values.get("setup")
+#             if setup and setup[-1] != "?":
+#                 raise ValueError("Badly formed question!")
+#             return values
+#
+#     # Set up a parser + inject instructions into the prompt template.
+#     parser = PydanticOutputParser(pydantic_object=Joke)
+#
+#     prompt = PromptTemplate(
+#         template="Answer the user query.\n{format_instructions}\n{query}\n",
+#         input_variables=["query"],
+#         partial_variables={"format_instructions": parser.get_format_instructions()},
+#     )
+#
+#     logging.info('prompt: %s', parser.get_format_instructions())
+#
+#     # And a query intended to prompt a language model to populate the data structure.
+#     prompt_and_model = prompt | model
+#     output = prompt_and_model.invoke({"query": "Tell me a joke."})
+#     logging.info('output: %s', output)
+#     result = parser.invoke(output)
+#     logging.info('result: %s', result)
 
 
-def prepare_test_dataset_parallel(model, prefix=''):
-    """병렬 처리를 사용한 테스트 데이터셋 준비"""
-    check_and_create_directory(prefix)
-    filepath = path.join(prefix, "saved_results.jsonl")
+# def prepare_test_dataset_parallel(model, prefix=''):
+#     """병렬 처리를 사용한 테스트 데이터셋 준비"""
+#     check_and_create_directory(prefix)
+#     filepath = path.join(prefix, "saved_results.jsonl")
+#
+#     if not Path(filepath).exists():
+#         logging.info(f"파일이 존재하지 않습니다. 데이터 파일 생성 중: {filepath}")
+#
+#         # 데이터셋 불러오기
+#         df = load_dataset("shangrilar/ko_text2sql", "origin")['test']
+#         df = df.to_pandas()
+#         df = df[:50]  # 필요한 경우 샘플 수 조정
+#
+#         # 프롬프트 목록 생성
+#         prompts = []
+#         for _, row in df.iterrows():
+#             prompts.append(row)
+#
+#         # 결과 처리
+#         parser = PydanticOutputParser(pydantic_object=SQL)
+#
+#         # 병렬 호출 실행
+#         results = llm_invoke_parallel(model, prompts, template, parser)
+#
+#         for idx, result in enumerate(results):
+#             try:
+#                 if 'message' in result and 'content' in result['message']:
+#                     content = result['message']['content']
+#                     cleaned_result = clean_response(parser, content)
+#                     df.loc[idx, 'gen_sql'] = cleaned_result.gen_sql
+#                 elif 'error' in result:
+#                     logging.error(f"오류 응답: {result['error']}")
+#                     df.loc[idx, 'gen_sql'] = ''
+#                 else:
+#                     logging.warning(f"예상치 못한 응답 형식: {result}")
+#                     df.loc[idx, 'gen_sql'] = ''
+#             except Exception as e:
+#                 logging.error(f"결과 처리 중 오류 발생: {str(e)}")
+#                 df.loc[idx, 'gen_sql'] = ''
+#
+#         # 결과 저장
+#         df.to_json(filepath, orient='records', lines=True)
+#         logging.info(f"파일 저장 완료: {filepath}")
+#     else:
+#         logging.info(f"파일이 존재합니다. 데이터 파일 로딩 중: {filepath}")
+#         df = pd.read_json(filepath, lines=True)
+#         logging.info(f"데이터 컬럼: {df.keys()}")
+#         logging.info(f"데이터: {df}")
+#         logging.info("파일 로딩 완료.")
+#
+#     return df
 
-    if not Path(filepath).exists():
-        logging.info(f"파일이 존재하지 않습니다. 데이터 파일 생성 중: {filepath}")
 
-        # 데이터셋 불러오기
-        df = load_dataset("shangrilar/ko_text2sql", "origin")['test']
-        df = df.to_pandas()
-        df = df[:50]  # 필요한 경우 샘플 수 조정
-
-        # 프롬프트 목록 생성
-        prompts = []
-        for _, row in df.iterrows():
-            prompts.append(row)
-
-        # 결과 처리
-        parser = PydanticOutputParser(pydantic_object=SQL)
-
-        # 병렬 호출 실행
-        results = llm_invoke_parallel(model, prompts, template, parser)
-
-        for idx, result in enumerate(results):
-            try:
-                if 'message' in result and 'content' in result['message']:
-                    content = result['message']['content']
-                    cleaned_result = clean_response(parser, content)
-                    df.loc[idx, 'gen_sql'] = cleaned_result.gen_sql
-                elif 'error' in result:
-                    logging.error(f"오류 응답: {result['error']}")
-                    df.loc[idx, 'gen_sql'] = ''
-                else:
-                    logging.warning(f"예상치 못한 응답 형식: {result}")
-                    df.loc[idx, 'gen_sql'] = ''
-            except Exception as e:
-                logging.error(f"결과 처리 중 오류 발생: {str(e)}")
-                df.loc[idx, 'gen_sql'] = ''
-
-        # 결과 저장
-        df.to_json(filepath, orient='records', lines=True)
-        logging.info(f"파일 저장 완료: {filepath}")
-    else:
-        logging.info(f"파일이 존재합니다. 데이터 파일 로딩 중: {filepath}")
-        df = pd.read_json(filepath, lines=True)
-        logging.info(f"데이터 컬럼: {df.keys()}")
-        logging.info(f"데이터: {df}")
-        logging.info("파일 로딩 완료.")
-
-    return df
-
-
-def prepare_test_dataset(model, prefix='', batch_size=10, max_concurrent=10, max_retries=3):
+def prepare_test_dataset(model, prefix='', batch_size=10, max_concurrent=10, max_retries=3, size=None):
     """병렬 처리를 사용한 테스트 데이터셋 준비 (진행률 로깅 기능 추가)"""
     check_and_create_directory(prefix)
     filepath = path.join(prefix, "saved_results.jsonl")
@@ -284,66 +169,42 @@ def prepare_test_dataset(model, prefix='', batch_size=10, max_concurrent=10, max
         # 데이터셋 불러오기
         df = load_dataset("shangrilar/ko_text2sql", "origin")['test']
         df = df.to_pandas()
-
-        # 모델과 파서 준비
-        parser = PydanticOutputParser(pydantic_object=SQL)
+        if size is not None and size > 0:
+            df = df[:size]
 
         # 프롬프트 목록 생성
-        prompts = []
+        datasets = []
         for _, row in df.iterrows():
-            prompts.append(row)
+            datasets.append(row)
 
         # 병렬 호출 실행
-        logging.info(f"총 {len(prompts)}개 프롬프트에 대한 병렬 처리를 시작합니다.")
-        results = llm_invoke_parallel(
+        logging.info(f"총 {len(datasets)}개 데이터셋에 대한 병렬 처리를 시작합니다.")
+        responses = llm_invoke_parallel(
             model,
-            prompts,
-            template,
-            parser,
+            datasets,
             batch_size=batch_size,
             max_retries=max_retries,
             max_concurrent=max_concurrent
         )
 
         # 결과 처리
-        success_count = 0
-        error_count = 0
-
-        for idx, result in enumerate(results):
-            try:
-                if result and 'message' in result and 'content' in result['message']:
-                    content = result['message']['content']
-                    cleaned_result = clean_response(parser, content)
-                    df.loc[idx, 'gen_sql'] = cleaned_result.gen_sql
-                    success_count += 1
-                elif result and 'error' in result:
-                    logging.error(f"오류 응답 (인덱스 {idx}): {result['error']}")
-                    df.loc[idx, 'gen_sql'] = ''
-                    error_count += 1
-                else:
-                    logging.warning(f"예상치 못한 응답 형식 (인덱스 {idx}): {result}")
-                    df.loc[idx, 'gen_sql'] = ''
-                    error_count += 1
-            except Exception as e:
-                logging.error(f"결과 처리 중 오류 발생 (인덱스 {idx}): {str(e)}")
-                df.loc[idx, 'gen_sql'] = ''
-                error_count += 1
+        results, success_count, error_count = make_result(responses, df)
 
         logging.info(f"결과 처리 완료: 성공 {success_count}개, 오류 {error_count}개")
 
         # 결과 저장
-        df.to_json(filepath, orient='records', lines=True)
+        results.to_json(filepath, orient='records', lines=True)
         logging.info(f"파일 저장 완료: {filepath}")
     else:
         logging.info(f"파일이 존재합니다. 데이터 파일 로딩 중: {filepath}")
-        df = pd.read_json(filepath, lines=True)
-        logging.info(f"데이터 컬럼: {df.keys()}")
+        results = pd.read_json(filepath, lines=True)
+        logging.info(f"데이터 컬럼: {results.keys()}")
         logging.info("파일 로딩 완료.")
 
     # 로그 핸들러 제거
     root_logger.removeHandler(file_handler)
 
-    return df
+    return results
 
 
 def make_requests_for_generation(df):
@@ -489,3 +350,89 @@ def prepare_test_ollama(model, prefix=''):
 
     return responses
 
+def prepare_test_dataset_langchain(model, prefix='', batch_size=10, max_concurrent=10, max_retries=3):
+    """병렬 처리를 사용한 테스트 데이터셋 준비 (진행률 로깅 기능 추가)"""
+    check_and_create_directory(prefix)
+    filepath = path.join(prefix, "saved_results.jsonl")
+
+    # 로그 파일 설정
+    log_filepath = path.join(prefix, "parallel_processing.log")
+    file_handler = logging.FileHandler(log_filepath)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+    root_logger = logging.getLogger()
+    root_logger.addHandler(file_handler)
+    root_logger.setLevel(logging.INFO)
+
+    logging.info(f"병렬 처리 로그를 {log_filepath}에 기록합니다.")
+
+    if not Path(filepath).exists():
+        logging.info(f"파일이 존재하지 않습니다. 데이터 파일 생성 중: {filepath}")
+
+        # 데이터셋 불러오기
+        df = load_dataset("shangrilar/ko_text2sql", "origin")['test']
+        df = df.to_pandas()
+
+        # 모델과 파서 준비
+        parser = PydanticOutputParser(pydantic_object=SQL)
+
+        # 프롬프트 목록 생성
+        prompts = []
+        for _, row in df.iterrows():
+            prompts.append(row)
+
+        # 병렬 호출 실행
+        logging.info(f"총 {len(prompts)}개 프롬프트에 대한 병렬 처리를 시작합니다.")
+        results = llm_invoke_parallel_langchain(
+            model,
+            prompts,
+            prompt_generator.template,
+            parser,
+            batch_size=batch_size,
+            max_retries=max_retries,
+            max_concurrent=max_concurrent
+        )
+
+        # 결과 처리
+        success_count = 0
+        error_count = 0
+
+        for idx, result in enumerate(results):
+            try:
+                if result and 'message' in result and 'content' in result['message']:
+                    content = result['message']['content']
+                    logging.debug("content: %s", content)
+                    cleaned_result = clean_response(sql_parser, content)
+                    df.loc[idx, 'gen_sql'] = cleaned_result.gen_sql
+                    success_count += 1
+                elif result and 'error' in result:
+                    logging.error(f"오류 응답 (인덱스 {idx}): {result['error']}")
+                    logging.debug("error 1: %s", result)
+                    df.loc[idx, 'gen_sql'] = ''
+                    error_count += 1
+                else:
+                    logging.warning(f"예상치 못한 응답 형식 (인덱스 {idx}): {result}")
+                    logging.debug("error 2: %s", result)
+                    df.loc[idx, 'gen_sql'] = ''
+                    error_count += 1
+            except Exception as e:
+                logging.error(f"결과 처리 중 오류 발생 (인덱스 {idx}): {str(e)}")
+                logging.debug("error 3: %s", str(e))
+                df.loc[idx, 'gen_sql'] = ''
+                error_count += 1
+
+        logging.info(f"결과 처리 완료: 성공 {success_count}개, 오류 {error_count}개")
+
+        # 결과 저장
+        df.to_json(filepath, orient='records', lines=True)
+        logging.info(f"파일 저장 완료: {filepath}")
+    else:
+        logging.info(f"파일이 존재합니다. 데이터 파일 로딩 중: {filepath}")
+        df = pd.read_json(filepath, lines=True)
+        logging.info(f"데이터 컬럼: {df.keys()}")
+        logging.info("파일 로딩 완료.")
+
+    # 로그 핸들러 제거
+    root_logger.removeHandler(file_handler)
+
+    return df

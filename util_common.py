@@ -93,7 +93,7 @@ def autotrain(
         trainer: str
 ):
     args = [
-        "llm",
+        "llms",
         "--train",
         "--model", model,
         "--project_name", project_name,

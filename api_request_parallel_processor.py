@@ -1,13 +1,16 @@
 import aiohttp  # for making API calls concurrently
 import argparse  # for running script from command line
 import asyncio  # for running API calls concurrently
-import json  # for saving results to a jsonl file
 import logging  # for logging rate limit warnings and other messages
 import os  # for reading API key
 import re  # for matching endpoint from request URL
 import tiktoken  # for counting tokens
-import time  # for sleeping after rate limit is hit
 from dataclasses import dataclass, field
+
+from langchain_core.prompts import PromptTemplate
+from langchain_ollama import OllamaLLM
+
+from util.progress import ProgressTracker
 
 
 async def process_api_requests_from_file(
@@ -1016,134 +1019,14 @@ import aiohttp
 import json
 import logging
 import time
-from typing import List, Dict, Any
-from tqdm.auto import tqdm
 
+async def llm_invoke_batch_langchain(prompts, model_name, template, parser, model_url="http://172.16.15.112:11434",
+                                     batch_size=10, max_retries=3, max_concurrent=10):
+    """프롬프트 배치에 대한 병렬 LLM 호출 (LangChain 사용, 진행률 로깅 기능 추가)"""
+    logging.info(f"LangChain 사용하여 {len(prompts)}개 프롬프트 처리 시작 (모델: {model_name}, 배치크기: {batch_size})")
 
-class ProgressTracker:
-    """병렬 처리 진행 상황을 추적하는 클래스"""
-
-    def __init__(self, total_prompts, batch_size):
-        self.total_prompts = total_prompts
-        self.batch_size = batch_size
-        self.completed = 0
-        self.successful = 0
-        self.failed = 0
-        self.start_time = time.time()
-        self.pbar = tqdm(total=total_prompts, desc="전체 진행률")
-
-        # 로그 설정
-        self.logger = logging.getLogger("BatchProcessor")
-        if not self.logger.handlers:
-            handler = logging.StreamHandler()
-            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-            handler.setFormatter(formatter)
-            self.logger.addHandler(handler)
-            self.logger.setLevel(logging.INFO)
-
-    def update_batch_progress(self, batch_size, batch_idx, total_batches):
-        """배치 시작 시 로깅"""
-        self.logger.info(f"배치 처리 시작: {batch_idx + 1}/{total_batches} (전체 진행률: {self.completed}/{self.total_prompts})")
-
-    def update_task_progress(self, task_id, status, elapsed=None, error=None):
-        """개별 태스크 진행 상황 업데이트"""
-        if status == "start":
-            self.logger.debug(f"태스크 #{task_id} 시작")
-        elif status == "success":
-            self.completed += 1
-            self.successful += 1
-            self.pbar.update(1)
-            if elapsed:
-                self.logger.debug(f"태스크 #{task_id} 완료: {elapsed:.2f}초 소요")
-        elif status == "failed":
-            self.completed += 1
-            self.failed += 1
-            self.pbar.update(1)
-            error_msg = f": {error}" if error else ""
-            self.logger.warning(f"태스크 #{task_id} 실패{error_msg}")
-        elif status == "retry":
-            retry_count = error if error else "?"
-            self.logger.info(f"태스크 #{task_id} 재시도 중 (시도 횟수: {retry_count})")
-
-    def update_batch_completion(self, batch_results):
-        """배치 완료 시 진행 상황 업데이트"""
-        batch_success = sum(1 for r in batch_results if not isinstance(r, Exception) and 'error' not in r)
-        batch_failed = len(batch_results) - batch_success
-
-        elapsed = time.time() - self.start_time
-        requests_per_second = self.completed / elapsed if elapsed > 0 else 0
-
-        # 현재 상태 로깅
-        self.logger.info(
-            f"배치 완료: 성공 {batch_success}, 실패 {batch_failed} "
-            f"(전체: {self.completed}/{self.total_prompts}, "
-            f"속도: {requests_per_second:.2f} 요청/초)"
-        )
-
-    def close(self):
-        """진행률 추적 종료"""
-        self.pbar.close()
-        elapsed = time.time() - self.start_time
-
-        self.logger.info(
-            f"처리 완료: 총 {self.total_prompts}개 요청, "
-            f"{elapsed:.2f}초 소요, "
-            f"성공: {self.successful}, 실패: {self.failed}, "
-            f"최종 속도: {self.total_prompts / elapsed:.2f} 요청/초"
-        )
-
-
-async def llm_invoke_single(session, prompt, model_url, model_name, template, parser, task_id, progress_tracker):
-    """진행률 추적 기능이 추가된 단일 프롬프트 비동기 LLM 호출"""
-    # 요청 시작 로깅
-    progress_tracker.update_task_progress(task_id, "start")
-    start_time = time.time()
-
-    payload = {
-        "model": model_name,
-        "stream": False,
-        "messages": [
-            {"role": "system", "content": template.format(
-                format_instructions=parser.get_format_instructions(),
-                ddl=prompt['context'],
-                request=prompt['question'],
-                sql=''
-            )}
-        ],
-        "format": {
-            "type": "object",
-            "properties": {
-                "reasoning": {"type": "string"},
-                "description": {"type": "string"},
-                "gen_sql": {"type": "string"}
-            },
-            "required": ["reasoning", "description", "gen_sql"]
-        }
-    }
-
-    try:
-        async with session.post(model_url, json=payload) as response:
-            if response.status != 200:
-                error_text = await response.text()
-                elapsed = time.time() - start_time
-                progress_tracker.update_task_progress(task_id, "failed", elapsed, error_text)
-                return {"error": error_text, "task_id": task_id}
-
-            result = await response.json()
-            elapsed = time.time() - start_time
-            progress_tracker.update_task_progress(task_id, "success", elapsed)
-            result["task_id"] = task_id  # 태스크 ID 추가
-            return result
-    except Exception as e:
-        elapsed = time.time() - start_time
-        progress_tracker.update_task_progress(task_id, "failed", elapsed, str(e))
-        return {"error": str(e), "task_id": task_id}
-
-
-async def llm_invoke_batch(prompts, model_name, template, parser, model_url="http://172.16.15.112:11434/api/chat",
-                           batch_size=10, max_retries=3, max_concurrent=10):
-    """프롬프트 배치에 대한 병렬 LLM 호출 (진행률 로깅 기능 추가)"""
-    all_results = [None] * len(prompts)  # 순서 보존을 위한 결과 저장 리스트
+    # 결과 저장용 리스트 초기화 (순서 보존)
+    all_results = [None] * len(prompts)
     total_prompts = len(prompts)
 
     # 배치 수 계산
@@ -1152,123 +1035,179 @@ async def llm_invoke_batch(prompts, model_name, template, parser, model_url="htt
     # 진행률 추적 객체 생성
     progress_tracker = ProgressTracker(total_prompts, batch_size)
 
+    # LangChain 모델 및 체인 준비 (한 번만 생성)
+    logging.info(f"LangChain 모델 초기화 중 (URL: {model_url})")
+
+    model = OllamaLLM(
+        model=model_name,
+        temperature=0.0,
+        base_url=model_url
+    )
+
+    prompt_template = PromptTemplate(
+        template=template,
+        input_variables=["request", "ddl", "sql"],
+        partial_variables={"format_instructions": parser.get_format_instructions()},
+    )
+
+    chain = prompt_template | model
+
     # 동시 연결 제한을 위한 세마포어
     semaphore = asyncio.Semaphore(max_concurrent)
 
-    # 커넥션 풀 설정으로 TCP 연결 재사용
-    conn = aiohttp.TCPConnector(limit=max_concurrent)
-    timeout = aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=60)
+    # LLM에 단일 프롬프트 전송하는 함수
+    async def llm_invoke_single(prompt, task_id):
+        async with semaphore:
+            try:
+                # 진행 상태 업데이트 - "시작" 상태로 변경
+                progress_tracker.update_task_progress(task_id, "start")
 
-    async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
-        for batch_idx in range(0, total_prompts, batch_size):
-            batch_end = min(batch_idx + batch_size, total_prompts)
-            batch = prompts[batch_idx:batch_end]
+                start_time = time.time()
 
-            # 배치 시작 로깅
-            progress_tracker.update_batch_progress(len(batch), batch_idx // batch_size, total_batches)
+                # LangChain을 사용하여 비동기 호출
+                response = await chain.ainvoke({
+                    'ddl': prompt.get('context', ''),
+                    'request': prompt.get('question', ''),
+                    'sql': ''
+                })
 
-            # 비동기 작업 생성
-            tasks = []
-            for i, prompt in enumerate(batch):
-                task_id = batch_idx + i
-                task = asyncio.create_task(
-                    llm_invoke_single(
-                        session, prompt, model_url, model_name, template, parser, task_id, progress_tracker
-                    )
-                )
-                tasks.append(task)
+                elapsed = time.time() - start_time
 
-            # 모든 작업 완료 대기
-            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+                # 응답 결과 구성
+                result = {
+                    "task_id": task_id,
+                    "response": response,
+                    "prompt": prompt
+                }
 
-            # 재시도가 필요한 작업 처리
-            retry_tasks = []
+                # 진행 상태 업데이트 - "성공" 상태로 변경
+                progress_tracker.update_task_progress(task_id, "success", elapsed=elapsed)
 
-            for result in batch_results:
+                return result
+
+            except Exception as e:
+                # 오류 처리
+                error_msg = str(e)
+                # 진행 상태 업데이트 - "실패" 상태로 변경
+                progress_tracker.update_task_progress(task_id, "failed", error=error_msg)
+                logging.error(f"Task {task_id} failed: {error_msg}")
+                return {
+                    "task_id": task_id,
+                    "error": error_msg,
+                    "prompt": prompt
+                }
+
+    # 실패한 작업 재시도 함수
+    async def retry_failed_tasks(retry_tasks):
+        """실패한 작업 재시도"""
+        retry_round = 0
+        while retry_tasks and retry_round < max_retries:
+            logging.info(f"재시도 라운드 {retry_round + 1}/{max_retries}, {len(retry_tasks)} 작업 재시도 중")
+
+            # 재시도 작업 비동기 실행
+            retry_coroutines = []
+            for task_id, prompt, retry_count in retry_tasks:
+                # 재시도 상태 업데이트
+                progress_tracker.update_task_progress(task_id, "retry", error=retry_count + 1)
+                retry_coroutines.append(llm_invoke_single(prompt, task_id))
+
+            retry_results = await asyncio.gather(*retry_coroutines, return_exceptions=True)
+
+            # 다음 라운드 재시도 작업 목록 초기화
+            next_retry_tasks = []
+
+            # 결과 처리
+            for (task_id, prompt, retry_count), result in zip(retry_tasks, retry_results):
                 if isinstance(result, Exception):
-                    logging.error(f"작업 예외 발생: {str(result)}")
+                    logging.error(f"재시도 중 예외 발생 (작업 {task_id}): {str(result)}")
+                    if retry_round < max_retries - 1:
+                        next_retry_tasks.append((task_id, prompt, retry_count + 1))
                     continue
 
-                task_id = result.get("task_id")
-                if task_id is None:
-                    logging.error(f"태스크 ID가 없는 결과: {result}")
-                    continue
-
-                # 오류 발생 여부 확인 및 재시도 결정
-                if "error" in result and max_retries > 0:
-                    retry_tasks.append((task_id, prompts[task_id], 0))  # (task_id, prompt, retry_count)
+                if "error" in result and retry_round < max_retries - 1:
+                    logging.warning(f"재시도 실패 (작업 {task_id}): {result.get('error', 'Unknown error')}")
+                    next_retry_tasks.append((task_id, prompt, retry_count + 1))
                 else:
-                    # 결과 저장 (원래 순서대로)
+                    # 결과 저장
+                    logging.info(f"재시도 성공 (작업 {task_id})")
                     all_results[task_id] = result
 
-            # 실패한 작업 재시도
-            if retry_tasks and max_retries > 0:
-                await retry_failed_tasks(session, retry_tasks, model_url, model_name, template,
-                                         parser, max_retries, all_results, progress_tracker)
+            # 재시도 목록 업데이트
+            retry_tasks = next_retry_tasks
 
-            # 배치 완료 로깅
-            progress_tracker.update_batch_completion(batch_results)
+            # 다음 라운드로 진행
+            retry_round += 1
 
-            # 서버 부하 방지를 위한 짧은 대기
-            if batch_end < total_prompts:
-                await asyncio.sleep(0.5)
+            # 짧은 대기 후 다음 재시도 라운드
+            if retry_tasks and retry_round < max_retries:
+                await asyncio.sleep(1)
+
+    # 메인 처리 로직
+    for batch_idx in range(0, total_prompts, batch_size):
+        batch_end = min(batch_idx + batch_size, total_prompts)
+        batch = prompts[batch_idx:batch_end]
+
+        # 배치 시작 로깅
+        batch_num = batch_idx // batch_size + 1
+        logging.info(f"배치 {batch_num}/{total_batches} 처리 시작 ({len(batch)} 프롬프트)")
+        progress_tracker.update_batch_progress(len(batch), batch_idx // batch_size, total_batches)
+
+        # 비동기 작업 생성
+        tasks = []
+        for i, prompt in enumerate(batch):
+            task_id = batch_idx + i
+            task = asyncio.create_task(llm_invoke_single(prompt, task_id))
+            tasks.append(task)
+
+        # 모든 작업 완료 대기
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 재시도가 필요한 작업 처리
+        retry_tasks = []
+        success_count = 0
+
+        for result in batch_results:
+            if isinstance(result, Exception):
+                logging.error(f"작업 예외 발생: {str(result)}")
+                continue
+
+            task_id = result.get("task_id")
+            if task_id is None:
+                logging.error(f"태스크 ID가 없는 결과: {result}")
+                continue
+
+            # 오류 발생 여부 확인 및 재시도 결정
+            if "error" in result and max_retries > 0:
+                retry_tasks.append((task_id, prompts[task_id], 0))  # (task_id, prompt, retry_count)
+            else:
+                # 결과 저장 (원래 순서대로)
+                all_results[task_id] = result
+                success_count += 1
+
+        # 실패한 작업 재시도
+        if retry_tasks and max_retries > 0:
+            logging.info(f"배치 {batch_num}에서 {len(retry_tasks)}개 작업 재시도 필요")
+            await retry_failed_tasks(retry_tasks)
+
+        # 배치 완료 로깅
+        logging.info(f"배치 {batch_num}/{total_batches} 처리 완료 (성공: {success_count}/{len(batch)})")
+        progress_tracker.update_batch_completion(batch_results)
+
+        # 서버 부하 방지를 위한 짧은 대기
+        if batch_end < total_prompts:
+            await asyncio.sleep(0.5)
 
     # 진행률 표시 종료
     progress_tracker.close()
 
+    # 전체 통계
+    successful_results = sum(1 for r in all_results if r and "error" not in r)
+    logging.info(f"전체 처리 완료: {successful_results}/{total_prompts} 성공")
+
     return all_results
 
 
-async def retry_failed_tasks(session, retry_tasks, model_url, model_name, template, parser,
-                             max_retries, all_results, progress_tracker):
-    """실패한 작업을 재시도하는 함수"""
-    retry_logger = logging.getLogger("RetryProcessor")
-
-    for retry_round in range(max_retries):
-        if not retry_tasks:
-            break
-
-        retry_logger.info(f"{len(retry_tasks)}개 작업 재시도 중 (라운드: {retry_round + 1}/{max_retries})")
-
-        current_tasks = retry_tasks
-        retry_tasks = []
-
-        # 재시도 작업 생성
-        tasks = []
-        for task_id, prompt, retry_count in current_tasks:
-            # 재시도 로깅
-            progress_tracker.update_task_progress(task_id, "retry", error=retry_count + 1)
-
-            # 재시도 요청 준비
-            task = asyncio.create_task(
-                llm_invoke_single(
-                    session, prompt, model_url, model_name, template, parser, task_id, progress_tracker
-                )
-            )
-            tasks.append((task, task_id, retry_count, prompt))
-
-        # 재시도 작업 처리
-        for task, task_id, retry_count, prompt in tasks:
-            try:
-                result = await task
-                if "error" in result and retry_count < max_retries - 1:
-                    # 다음 재시도 라운드에 추가
-                    retry_tasks.append((task_id, prompt, retry_count + 1))
-                else:
-                    # 최종 결과 저장
-                    all_results[task_id] = result
-            except Exception as e:
-                if retry_count < max_retries - 1:
-                    retry_tasks.append((task_id, prompt, retry_count + 1))
-                else:
-                    all_results[task_id] = {"error": str(e), "task_id": task_id}
-
-        # 다음 재시도 라운드 전에 짧은 대기
-        if retry_tasks:
-            await asyncio.sleep(1)
-
-
-def llm_invoke_parallel(model, prompts, template, parser, batch_size=10, max_retries=3, max_concurrent=10):
+def llm_invoke_parallel_langchain(model, prompts, template, parser, batch_size=10, max_retries=3, max_concurrent=10):
     """병렬 처리를 위한 래퍼 함수 (로깅 기능 추가)"""
     logging.info(f"병렬 처리 시작: 총 {len(prompts)}개 요청 (배치 크기: {batch_size}, 최대 동시 요청: {max_concurrent})")
 
@@ -1276,7 +1215,7 @@ def llm_invoke_parallel(model, prompts, template, parser, batch_size=10, max_ret
 
     loop = asyncio.get_event_loop()
     results = loop.run_until_complete(
-        llm_invoke_batch(
+        llm_invoke_batch_langchain(
             prompts,
             model,
             template,

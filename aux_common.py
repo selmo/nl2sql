@@ -10,7 +10,7 @@ from os import path
 from datasets import load_dataset
 from peft import PeftModel
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-from utils import make_prompt
+from utils import make_prompt, change_jsonl_to_csv
 from util_common import check_and_create_directory, clean_filepath, make_requests_for_evaluation, make_request_jobs
 
 # 로깅 설정 (원하는 포맷과 레벨로 조정 가능)
@@ -179,8 +179,7 @@ def evaluation(ft_model, verifying_model, dataset, prefix, api_key=""):
         max_attempts=10,
         logging_level=20
     )
-    import utils
-    base_eval = utils.change_jsonl_to_csv(
+    base_eval = change_jsonl_to_csv(
         save_filepath,
         output_file,
         # "prompt",

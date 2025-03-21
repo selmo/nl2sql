@@ -21,7 +21,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='모델 학습 및 평가 도구')
 
     # 공통 인수
-    parser.add_argument('command', choices=['train', 'test', 'eval', 'ollama-api', 'ollama-http', 'eval-csv'],
+    parser.add_argument('command', choices=['train', 'test', 'eval', 'ollama-langchain', 'ollama-api', 'ollama-http', 'eval-csv'],
                         help='실행할 명령 (train, test, eval, ollama-api, ollama-http, eval-csv)')
     parser.add_argument('--prefix', type=str, default=".",
                         help='실행 데이터 디렉토리 접두사')
@@ -45,19 +45,17 @@ def parse_arguments():
 
     return parser.parse_args()
 
+
+# # base_model = 'defog/sqlcoder-7b-2'
+# # finetuned_model = "sqlcoder-finetuned"
+# verifying_model = "deepseek-r1:70b"  # "llama3.3:70b"
+# base_model = ''  # 'qwq'
+# finetuned_model = "Qwen/QwQ-32B-AWQ"  # "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
+
 # main routine
 if __name__ == "__main__":
     args = parse_arguments()
-
     prefix = args.prefix
-    datapath = path.join(prefix, 'data')
-    check_and_create_directory(datapath)
-
-    # # base_model = 'defog/sqlcoder-7b-2'
-    # # finetuned_model = "sqlcoder-finetuned"
-    # verifying_model = "deepseek-r1:70b"  # "llama3.3:70b"
-    # base_model = ''  # 'qwq'
-    # finetuned_model = "Qwen/QwQ-32B-AWQ"  # "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
 
     base_model = args.base_model
     finetuned_model = args.finetuned_model
@@ -70,6 +68,9 @@ if __name__ == "__main__":
     timing_stats_manager.start_process(f"command_{args.command}", "main")
 
     if args.command == 'train':
+        datapath = path.join(prefix, 'data')
+        check_and_create_directory(datapath)
+
         timing_stats_manager.start_process("prepare_train_dataset", f"command_{args.command}")
         prepare_train_dataset(prefix)
         timing_stats_manager.stop_process("prepare_train_dataset")
@@ -121,14 +122,6 @@ if __name__ == "__main__":
         logging.info(f"평가 완료: {eval_time:.2f}초 소요")
 
     elif args.command == 'ollama-api':
-        # # prefix = "20250319-qwq-27b"
-        # finetuned_model = "qwq"
-        # # finetuned_model = "gemma3:27b"
-        #
-        # # verifying_model = "gpt-4o-mini"
-        # verifying_model = "llama3.3:70b"
-        # # verifying_model = "deepseek-r1:70b"
-
         # 병렬 처리 매개변수 설정
         batch_size = args.batch_size
         max_concurrent = args.max_concurrent
@@ -149,7 +142,8 @@ if __name__ == "__main__":
             model_prefix,
             batch_size=batch_size,
             max_concurrent=max_concurrent,
-            max_retries=max_retries
+            max_retries=max_retries,
+            # size=10
         )
         prepare_time = timing_stats_manager.stop_process("prepare_test_dataset")
         logging.info(f"테스트 데이터셋 준비 완료: {prepare_time:.2f}초 소요")
@@ -157,9 +151,8 @@ if __name__ == "__main__":
         # 평가 시간 측정
         timing_stats_manager.start_process("evaluation", f"command_{args.command}")
         result_prefix = f"{prefix}_{model_id.replace(':', '-')}_{verifying_model.replace(':', '-')}"
-        # evaluation(model_id, verifying_model, test_dataset, result_prefix)
         api_key = "crR2uHiE9awuVzimCtwmCXG6apq_rsPhHBBfjt1PSts4VmcZyLEwCJv3FFWqCD4hp20KGDL6oeT3BlbkFJBR4xBLE6TLPOwXaUdRiEgzqwE96hHs6xNKZTVXdWrEbxuqUHUZe3neqOYSrHghB8K3NOzVrXMA"
-        evaluation(model_id, verifying_model, test_dataset, prefix, api_key=f"sk-proj-{api_key}")
+        evaluation(model_id, verifying_model, test_dataset, result_prefix, api_key=f"sk-proj-{api_key}")
         eval_time = timing_stats_manager.stop_process("evaluation")
         logging.info(f"평가 완료: {eval_time:.2f}초 소요")
 
@@ -206,6 +199,41 @@ if __name__ == "__main__":
         logging.info("Evaluation CSV:\n%s", base_eval)
         logging.info("Number of correct answers: %s", num_correct_answers)
         logging.info(f"결과 분석 완료: {analyze_time:.2f}초 소요")
+
+    elif args.command == 'ollama-langchain':
+        # 병렬 처리 매개변수 설정
+        batch_size = args.batch_size
+        max_concurrent = args.max_concurrent
+        max_retries = args.max_retries
+
+        logging.info(f"병렬 처리 설정: 배치 크기 {batch_size}, 최대 동시 요청 {max_concurrent}, 최대 재시도 {max_retries}")
+
+        # 모델 병합 시간 측정
+        timing_stats_manager.start_process("merge_model", f"command_{args.command}")
+        model_id, model_prefix = merge_model(base_model, finetuned_model, prefix)
+        merge_time = timing_stats_manager.stop_process("merge_model")
+        logging.info(f"모델 병합 완료: {merge_time:.2f}초 소요")
+
+        # 테스트 데이터셋 준비 시간 측정 (병렬 처리)
+        timing_stats_manager.start_process("prepare_test_dataset", f"command_{args.command}")
+        test_dataset = aux_local.prepare_test_dataset_langchain(
+            model_id,
+            model_prefix,
+            batch_size=batch_size,
+            max_concurrent=max_concurrent,
+            max_retries=max_retries
+        )
+        prepare_time = timing_stats_manager.stop_process("prepare_test_dataset")
+        logging.info(f"테스트 데이터셋 준비 완료: {prepare_time:.2f}초 소요")
+
+        # 평가 시간 측정
+        timing_stats_manager.start_process("evaluation", f"command_{args.command}")
+        result_prefix = f"{prefix}_{model_id.replace(':', '-')}_{verifying_model.replace(':', '-')}"
+        # evaluation(model_id, verifying_model, test_dataset, result_prefix)
+        api_key = "crR2uHiE9awuVzimCtwmCXG6apq_rsPhHBBfjt1PSts4VmcZyLEwCJv3FFWqCD4hp20KGDL6oeT3BlbkFJBR4xBLE6TLPOwXaUdRiEgzqwE96hHs6xNKZTVXdWrEbxuqUHUZe3neqOYSrHghB8K3NOzVrXMA"
+        evaluation(model_id, verifying_model, test_dataset, result_prefix, api_key=f"sk-proj-{api_key}")
+        eval_time = timing_stats_manager.stop_process("evaluation")
+        logging.info(f"평가 완료: {eval_time:.2f}초 소요")
 
     else:
         print('사용 가능한 명령: train, test, eval, ollama-api, ollama-http, eval-csv')
