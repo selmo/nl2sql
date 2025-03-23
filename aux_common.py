@@ -12,6 +12,7 @@ from peft import PeftModel
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 from utils import make_prompt, change_jsonl_to_csv
 from util_common import check_and_create_directory, clean_filepath, make_requests_for_evaluation, make_request_jobs
+from pathlib import Path
 
 # 로깅 설정 (원하는 포맷과 레벨로 조정 가능)
 logging.basicConfig(
@@ -146,6 +147,8 @@ def evaluation(ft_model, verifying_model, dataset, prefix, api_key=""):
     logging.info("Evaluation file path: %s", eval_filepath)
 
     requests_path = path.join(prefix, 'requests')
+    if not Path(requests_path).exists():
+        Path(requests_path).mkdir(parents=True)
     results_path = path.join(prefix, 'results')
     requests_filepath = clean_filepath(eval_filepath, prefix=requests_path)
     save_filepath = clean_filepath(eval_filepath, prefix=results_path)
@@ -155,7 +158,7 @@ def evaluation(ft_model, verifying_model, dataset, prefix, api_key=""):
     check_and_create_directory(path.dirname(output_file))
 
     # 평가를 위한 requests.jsonl 생성
-    prompts = make_requests_for_evaluation(dataset, directory=requests_path)
+    prompts = make_requests_for_evaluation(dataset)
 
     jobs = make_request_jobs(verifying_model, prompts)
 

@@ -25,6 +25,8 @@ def parse_arguments():
                         help='실행할 명령 (train, test, eval, ollama-api, ollama-http, eval-csv)')
     parser.add_argument('--prefix', type=str, default=".",
                         help='실행 데이터 디렉토리 접두사')
+    parser.add_argument('--ollama-url', type=str, default="172.16.15.112",
+                        help='ollama server 주소')
     parser.add_argument('--base-model', type=str, default='qwq',
                         help='기본 모델 이름')
     parser.add_argument('--finetuned-model', type=str, default="",
@@ -39,6 +41,7 @@ def parse_arguments():
                         help='최대 동시 요청 수 (ollama-api 명령 시 사용, 기본값: 10)')
     parser.add_argument('--max-retries', type=int, default=3,
                         help='최대 재시도 횟수 (ollama-api 명령 시 사용, 기본값: 3)')
+    parser.add_argument('--eval-api', action='store_true', help='평가에 api 사용')
 
     # eval-csv 명령에 대한 추가 인수
     parser.add_argument('--csv-path', type=str, help='평가할 CSV 파일 경로 (eval-csv 명령 시 필수)')
@@ -111,7 +114,7 @@ if __name__ == "__main__":
 
         # 테스트 데이터셋 준비 시간 측정
         timing_stats_manager.start_process("prepare_test_dataset", f"command_{args.command}")
-        test_dataset = prepare_test_dataset(finetuned_model, prefix)
+        test_dataset = aux_local.prepare_test_dataset_origin(base_model, prefix)
         prepare_time = timing_stats_manager.stop_process("prepare_test_dataset")
         logging.info(f"테스트 데이터셋 준비 완료: {prepare_time:.2f}초 소요")
 
@@ -143,7 +146,8 @@ if __name__ == "__main__":
             batch_size=batch_size,
             max_concurrent=max_concurrent,
             max_retries=max_retries,
-            # size=10
+            ollama_url=args.ollama_url
+            # size=1
         )
         prepare_time = timing_stats_manager.stop_process("prepare_test_dataset")
         logging.info(f"테스트 데이터셋 준비 완료: {prepare_time:.2f}초 소요")
@@ -152,7 +156,12 @@ if __name__ == "__main__":
         timing_stats_manager.start_process("evaluation", f"command_{args.command}")
         result_prefix = f"{prefix}_{model_id.replace(':', '-')}_{verifying_model.replace(':', '-')}"
         api_key = "crR2uHiE9awuVzimCtwmCXG6apq_rsPhHBBfjt1PSts4VmcZyLEwCJv3FFWqCD4hp20KGDL6oeT3BlbkFJBR4xBLE6TLPOwXaUdRiEgzqwE96hHs6xNKZTVXdWrEbxuqUHUZe3neqOYSrHghB8K3NOzVrXMA"
-        evaluation(model_id, verifying_model, test_dataset, result_prefix, api_key=f"sk-proj-{api_key}")
+
+        if args.eval_api:
+            aux_local.evaluation_api(verifying_model, test_dataset, result_prefix, api_key=f"sk-proj-{api_key}")
+        else:
+            evaluation(model_id, verifying_model, test_dataset, result_prefix, api_key=f"sk-proj-{api_key}")
+
         eval_time = timing_stats_manager.stop_process("evaluation")
         logging.info(f"평가 완료: {eval_time:.2f}초 소요")
 

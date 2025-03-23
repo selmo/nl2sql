@@ -1,13 +1,16 @@
 import pandas as pd
 import logging
 import re
+import json
 
+import util_common
 from api_request_parallel_processor import process_in_memory, llm_invoke_parallel_langchain
+from aux_common import make_inference_pipeline
 from llms import prompt_generator
-from llms.ollama_api import llm_invoke_parallel
-from llms.prompt_generator import sql_parser, SQL
+from llms.ollama_api import llm_invoke_parallel, llm_invoke_jobs_parallel
+from llms.prompt_generator import sql_parser, SQL, make_prompt
 from llms.response_processor import make_result, clean_response
-from util_common import clean_filepath, check_and_create_directory
+from util_common import clean_filepath, check_and_create_directory, make_requests_for_evaluation
 from langchain_core.output_parsers import PydanticOutputParser
 
 from datasets import load_dataset
@@ -15,6 +18,8 @@ from langchain_core.prompts import PromptTemplate
 from langchain_ollama.llms import OllamaLLM
 from os import path
 from pathlib import Path
+
+from utils import change_jsonl_to_csv, change_responses_to_csv
 
 # 로깅 설정 (원하는 포맷과 레벨로 조정 가능)
 logging.basicConfig(
@@ -145,9 +150,45 @@ def prepare_dataset(model, parser, messages):
 #         logging.info("파일 로딩 완료.")
 #
 #     return df
+def prepare_test_dataset_origin(model, prefix=''):
+    df_filepath = path.join(prefix, f"{model}.jsonl")
+    util_common.check_and_create_directory(path.dirname(df_filepath))
+
+    if path.exists(df_filepath):
+        logging.info("File exists. Loading file: %s", df_filepath)
+        df = pd.read_json(df_filepath, lines=True)
+        logging.info(f"Data Columns: {df.keys()}")
+        logging.info(f"Data: {df}")
+    else:
+        logging.info(f"File not exists. Creating data file: {df_filepath}")
+        # 데이터셋 불러오기
+        df = load_dataset("shangrilar/ko_text2sql", "origin")['test']
+        df = df.to_pandas()
+        for idx, row in df.iterrows():
+            prompt = make_prompt(model, row['context'], row['question'])
+            df.loc[idx, 'prompt'] = prompt
+
+        # sql 생성
+        hf_pipe = make_inference_pipeline(model)
+
+        gen_sqls = hf_pipe(
+            df['prompt'].tolist(),
+            do_sample=False,
+            return_full_text=False,
+            # max_length=512,
+            truncation=True
+        )
+        gen_sqls = [x[0][('generated_text')] for x in gen_sqls]
+        df['gen_sql'] = gen_sqls
+        logging.info(f"Data Columns: {df.keys()}")
+        logging.info(f"Data: {df}")
+        df.to_json(df_filepath, orient='records', lines=True)
+        logging.info(f"Data file saved: {df_filepath}")
+
+    return df
 
 
-def prepare_test_dataset(model, prefix='', batch_size=10, max_concurrent=10, max_retries=3, size=None):
+def prepare_test_dataset(model, prefix='', batch_size=10, max_concurrent=10, max_retries=3, size=None, ollama_url=None):
     """병렬 처리를 사용한 테스트 데이터셋 준비 (진행률 로깅 기능 추가)"""
     check_and_create_directory(prefix)
     filepath = path.join(prefix, "saved_results.jsonl")
@@ -184,7 +225,8 @@ def prepare_test_dataset(model, prefix='', batch_size=10, max_concurrent=10, max
             datasets,
             batch_size=batch_size,
             max_retries=max_retries,
-            max_concurrent=max_concurrent
+            max_concurrent=max_concurrent,
+            url=ollama_url
         )
 
         # 결과 처리
@@ -373,9 +415,6 @@ def prepare_test_dataset_langchain(model, prefix='', batch_size=10, max_concurre
         df = load_dataset("shangrilar/ko_text2sql", "origin")['test']
         df = df.to_pandas()
 
-        # 모델과 파서 준비
-        parser = PydanticOutputParser(pydantic_object=SQL)
-
         # 프롬프트 목록 생성
         prompts = []
         for _, row in df.iterrows():
@@ -387,7 +426,6 @@ def prepare_test_dataset_langchain(model, prefix='', batch_size=10, max_concurre
             model,
             prompts,
             prompt_generator.template,
-            parser,
             batch_size=batch_size,
             max_retries=max_retries,
             max_concurrent=max_concurrent
@@ -398,11 +436,12 @@ def prepare_test_dataset_langchain(model, prefix='', batch_size=10, max_concurre
         error_count = 0
 
         for idx, result in enumerate(results):
+            logging.info("Result: [%s] %s", type(result), result)
             try:
-                if result and 'message' in result and 'content' in result['message']:
-                    content = result['message']['content']
+                if result and 'response' in result:
+                    content = result['response']
                     logging.debug("content: %s", content)
-                    cleaned_result = clean_response(sql_parser, content)
+                    cleaned_result = clean_response(content)
                     df.loc[idx, 'gen_sql'] = cleaned_result.gen_sql
                     success_count += 1
                 elif result and 'error' in result:
@@ -436,3 +475,122 @@ def prepare_test_dataset_langchain(model, prefix='', batch_size=10, max_concurre
     root_logger.removeHandler(file_handler)
 
     return df
+
+
+def evaluation_api(model, dataset, prefix='', batch_size=10, max_concurrent=10, max_retries=3, size=None, api_key=""):
+    """병렬 처리를 사용한 테스트 데이터셋 준비 (진행률 로깅 기능 추가)"""
+    check_and_create_directory(prefix)
+    filepath = path.join(prefix, "text2sql.jsonl")
+    requests_path = path.join(prefix, 'requests')
+    if not Path(requests_path).exists():
+        Path(requests_path).mkdir(parents=True)
+    requests_filepath = clean_filepath(filepath, prefix=requests_path)
+    check_and_create_directory(path.dirname(requests_filepath))
+
+    prompts = make_requests_for_evaluation(dataset)
+    jobs = util_common.make_request_jobs(model, prompts)
+
+    with open(requests_filepath, "w") as f:
+        for job in jobs:
+            json_string = json.dumps(job)
+            f.write(json_string + "\n")
+
+    # 로그 파일 설정
+    log_filepath = path.join(prefix, "parallel_processing_eval.log")
+    file_handler = logging.FileHandler(log_filepath)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+
+    root_logger = logging.getLogger()
+    root_logger.addHandler(file_handler)
+    root_logger.setLevel(logging.INFO)
+
+    logging.info(f"병렬 처리 로그를 {log_filepath}에 기록합니다.")
+
+    url = "https://api.openai.com/v1/chat/completions" if model.lower().startswith(
+        'gpt') or model.startswith('o1') or model.startswith('o3') else "http://172.16.15.112:11434/api/chat"
+
+    # 데이터셋 불러오기
+    if size is not None and size > 0:
+        jobs = jobs[:size]
+
+    # 병렬 호출 실행
+    logging.info(f"총 {len(jobs)}개 데이터셋에 대한 병렬 처리를 시작합니다.")
+    responses = llm_invoke_jobs_parallel(
+        model,
+        jobs,
+        url,
+        batch_size=batch_size,
+        max_retries=max_retries,
+        max_concurrent=max_concurrent
+    )
+
+    output_file = path.join(prefix, "result.csv")
+    base_eval = change_responses_to_csv(
+        responses,
+        output_file,
+        # "prompt",
+        response_column="resolve_yn",
+        model=model
+    )
+
+    base_eval['resolve_yn'] = base_eval['resolve_yn'].apply(lambda x: json.loads(x)['resolve_yn'])
+    num_correct_answers = base_eval.query("resolve_yn == 'yes'").shape[0]
+
+    logging.info("Evaluation CSV:\n%s", base_eval)
+    logging.info("Number of correct answers: %s", num_correct_answers)
+
+
+
+
+    # eval_filepath = "text2sql.jsonl"
+    #
+    # logging.info("DataFrame:\n%s", dataset)
+    # logging.info("Evaluation file path: %s", eval_filepath)
+    #
+    # requests_path = path.join(prefix, 'requests')
+    # results_path = path.join(prefix, 'results')
+    # requests_filepath = clean_filepath(eval_filepath, prefix=requests_path)
+    # save_filepath = clean_filepath(eval_filepath, prefix=results_path)
+    # output_file = clean_filepath(f"{ft_model}.csv", prefix=results_path)
+    # check_and_create_directory(path.dirname(requests_filepath))
+    # check_and_create_directory(path.dirname(save_filepath))
+    # check_and_create_directory(path.dirname(output_file))
+    #
+    # # 평가를 위한 requests.jsonl 생성
+    # prompts = make_requests_for_evaluation(dataset, directory=requests_path)
+    #
+    # jobs = make_request_jobs(verifying_model, prompts)
+    #
+    # with open(requests_filepath, "w") as f:
+    #     for job in jobs:
+    #         json_string = json.dumps(job)
+    #         f.write(json_string + "\n")
+    #
+    # url = "https://api.openai.com/v1/chat/completions" if verifying_model.lower().startswith(
+    #     'gpt') or verifying_model.startswith('o1') or verifying_model.startswith('o3') else "http://172.16.15.112:11434/api/chat"
+    #
+    # logging.info('URL: %s', url)
+    # api_request_parallel_processor.process_by_file(
+    #     requests_filepath=requests_filepath,
+    #     save_filepath=save_filepath,
+    #     request_url=url,
+    #     api_key=api_key,
+    #     max_requests_per_minute=2500,
+    #     max_tokens_per_minute=100000,
+    #     token_encoding_name="cl100k_base",
+    #     max_attempts=10,
+    #     logging_level=20
+    # )
+    # base_eval = change_jsonl_to_csv(
+    #     save_filepath,
+    #     output_file,
+    #     # "prompt",
+    #     response_column="resolve_yn",
+    #     model=verifying_model
+    # )
+    #
+    # base_eval['resolve_yn'] = base_eval['resolve_yn'].apply(lambda x: json.loads(x)['resolve_yn'])
+    # num_correct_answers = base_eval.query("resolve_yn == 'yes'").shape[0]
+    #
+    # logging.info("Evaluation CSV:\n%s", base_eval)
+    # logging.info("Number of correct answers: %s", num_correct_answers)

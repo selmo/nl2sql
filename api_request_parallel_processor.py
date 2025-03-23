@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from langchain_core.prompts import PromptTemplate
 from langchain_ollama import OllamaLLM
 
+from llms.prompt_generator import sql_parser
 from util.progress import ProgressTracker
 
 
@@ -1020,7 +1021,7 @@ import json
 import logging
 import time
 
-async def llm_invoke_batch_langchain(prompts, model_name, template, parser, model_url="http://172.16.15.112:11434",
+async def llm_invoke_batch_langchain(model_name, prompts, template, model_url="http://172.16.15.112:11434",
                                      batch_size=10, max_retries=3, max_concurrent=10):
     """프롬프트 배치에 대한 병렬 LLM 호출 (LangChain 사용, 진행률 로깅 기능 추가)"""
     logging.info(f"LangChain 사용하여 {len(prompts)}개 프롬프트 처리 시작 (모델: {model_name}, 배치크기: {batch_size})")
@@ -1047,7 +1048,7 @@ async def llm_invoke_batch_langchain(prompts, model_name, template, parser, mode
     prompt_template = PromptTemplate(
         template=template,
         input_variables=["request", "ddl", "sql"],
-        partial_variables={"format_instructions": parser.get_format_instructions()},
+        partial_variables={"format_instructions": sql_parser.get_format_instructions()},
     )
 
     chain = prompt_template | model
@@ -1207,7 +1208,7 @@ async def llm_invoke_batch_langchain(prompts, model_name, template, parser, mode
     return all_results
 
 
-def llm_invoke_parallel_langchain(model, prompts, template, parser, batch_size=10, max_retries=3, max_concurrent=10):
+def llm_invoke_parallel_langchain(model, prompts, template, batch_size=10, max_retries=3, max_concurrent=10):
     """병렬 처리를 위한 래퍼 함수 (로깅 기능 추가)"""
     logging.info(f"병렬 처리 시작: 총 {len(prompts)}개 요청 (배치 크기: {batch_size}, 최대 동시 요청: {max_concurrent})")
 
@@ -1216,10 +1217,9 @@ def llm_invoke_parallel_langchain(model, prompts, template, parser, batch_size=1
     loop = asyncio.get_event_loop()
     results = loop.run_until_complete(
         llm_invoke_batch_langchain(
-            prompts,
             model,
+            prompts,
             template,
-            parser,
             batch_size=batch_size,
             max_retries=max_retries,
             max_concurrent=max_concurrent

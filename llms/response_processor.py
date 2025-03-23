@@ -26,24 +26,28 @@ def extract_sql_queries(text: str) -> str:
     return ""
 
 
-def clean_response(parser, response):
+def clean_response(response, parser=None):
     clean_output = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
-    try:
-        result = parser.parse(clean_output)
-        logging.debug("result: %s\n", result)
-        return result
-    except OutputParserException as e:
-        logging.error("response: %s", response)
-        logging.error("clean_output: %s", clean_output)
-        query_match = extract_sql_queries(clean_output)
-        logging.error("query: %s", query_match)
-        sql_obj = SQL(
-            reasoning="",
-            description="Parsing error.",
-            gen_sql=query_match
-        )
-        logging.error("error msg: %s\n", e)
-        return sql_obj
+    if parser is None:
+        logging.info("cleaned_output: [%s] %s", type(clean_output), clean_output)
+        return clean_output
+    else:
+        try:
+            result = parser.parse(clean_output)
+            logging.debug("result: [%s] %s\n", type(result), result)
+            return result
+        except OutputParserException as e:
+            logging.error("response: %s", response)
+            logging.error("clean_output: %s", clean_output)
+            query_match = extract_sql_queries(clean_output)
+            logging.error("query: %s", query_match)
+            sql_obj = SQL(
+                reasoning="",
+                description="Parsing error.",
+                gen_sql=query_match
+            )
+            logging.error("error msg: %s\n", e)
+            return sql_obj
 # result:
 # {'model': 'sqlcoder:15b',
 #  'created_at': '2025-03-21T01:35:28.250463879Z',
@@ -105,13 +109,13 @@ def make_result(
     gen_sql_list = []
 
     for idx, result in enumerate(responses):
-        logging.debug("Result index %d: %s", idx, result)
+        logging.debug("Result index #%d: %s", idx, result)
         try:
             if is_valid_content(result):
                 content = result['message']['content']
                 logging.debug("Content: %s", content)
                 # clean_response는 예시로 둡니다. 실제 로직은 필요에 맞춰 구현
-                cleaned_result = clean_response(sql_parser, content)
+                cleaned_result = clean_response(content, sql_parser)
                 gen_sql_list.append(cleaned_result.gen_sql)
                 success_count += 1
 
@@ -119,28 +123,28 @@ def make_result(
                 content = result['response']
                 logging.debug("Content: %s", content)
                 # clean_response는 예시로 둡니다. 실제 로직은 필요에 맞춰 구현
-                cleaned_result = clean_response(sql_parser, content)
+                cleaned_result = clean_response(content, sql_parser)
                 gen_sql_list.append(cleaned_result.gen_sql)
                 success_count += 1
 
             elif has_error(result):
-                logging.error("오류 응답 (인덱스 %d): %s", idx, result['error'])
+                logging.error("오류 응답 (인덱스 #%d): %s", idx, result['error'])
                 logging.debug("Full error result: %s", result)
                 gen_sql_list.append('')
                 error_count += 1
 
             else:
-                logging.warning("예상치 못한 응답 형식 (인덱스 %d): %s", idx, result)
+                logging.warning("예상치 못한 응답 형식 (인덱스 #%d): %s", idx, result)
                 logging.debug("Unhandled response: %s", result)
                 gen_sql_list.append('')
                 error_count += 1
 
         except KeyError as ke:
-            logging.error("KeyError (인덱스 %d): %s", idx, str(ke))
+            logging.error("KeyError (인덱스 #%d): %s", idx, str(ke))
             gen_sql_list.append('')
             error_count += 1
         except Exception as e:
-            logging.error("결과 처리 중 알 수 없는 오류 (인덱스 %d): %s", idx, str(e))
+            logging.error("결과 처리 중 알 수 없는 오류 (인덱스 #%d): %s", idx, str(e))
             gen_sql_list.append('')
             error_count += 1
 

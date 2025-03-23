@@ -53,9 +53,7 @@ def make_request_jobs(model, prompts):
     return jobs
 
 
-def make_requests_for_evaluation(df, directory='requests'):
-    if not Path(directory).exists():
-        Path(directory).mkdir(parents=True)
+def make_requests_for_evaluation(df):
     prompts = []
     for idx, row in df.iterrows():
         prompts.append(
