@@ -173,13 +173,33 @@ def prepare_test_dataset_origin(model, prefix='', test_size=0):
         # sql 생성
         hf_pipe = make_inference_pipeline(model)
 
-        gen_sqls = hf_pipe(
-            df['prompt'].tolist(),
-            do_sample=False,
-            return_full_text=False,
-            # max_length=512,
-            truncation=True
-        )
+        gen_sqls = []
+        # tqdm의 total은 전체 prompt 수
+        batch_size = 10
+        prompts = df['prompt'].tolist()
+        from tqdm import tqdm
+        for i in tqdm(range(0, len(prompts), batch_size), desc="Inference"):
+            batch = prompts[i: i + batch_size]
+            # pipeline에 한 번에 batch_size개씩 넣어주기
+            outputs = hf_pipe(
+                batch,
+                do_sample=False,
+                return_full_text=False,
+                truncation=True
+            )
+            # 파이프라인 반환값이 리스트 형태일 것이므로
+            if batch_size == 1:
+                # 단일 prompt만 줬을 경우도 리스트로 나오므로
+                outputs = [outputs]
+            gen_sqls.extend(outputs)
+
+        # gen_sqls = hf_pipe(
+        #     df['prompt'].tolist(),
+        #     do_sample=False,
+        #     return_full_text=False,
+        #     # max_length=512,
+        #     truncation=True
+        # )
         gen_sqls = [x[0][('generated_text')] for x in gen_sqls]
         df['gen_sql'] = gen_sqls
         logging.info(f"Data Columns: {df.keys()}")
