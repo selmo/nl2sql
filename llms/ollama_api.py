@@ -43,7 +43,7 @@ async def llm_invoke_single(session, data, model_url, model_name, task_id, progr
     prompt = make_prompt(model_name, data['context'], data['question'])
     request = make_request(model_name, prompt)
 
-    logging.info("request: %", request)
+    logging.info("request: %s", request)
 
     try:
         async with session.post(model_url, json=request) as response:
