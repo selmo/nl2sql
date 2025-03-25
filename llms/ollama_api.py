@@ -43,6 +43,8 @@ async def llm_invoke_single(session, data, model_url, model_name, task_id, progr
     prompt = make_prompt(model_name, data['context'], data['question'])
     request = make_request(model_name, prompt)
 
+    logging.info("request: %", request)
+
     try:
         async with session.post(model_url, json=request) as response:
             if response.status != 200:
@@ -62,7 +64,7 @@ async def llm_invoke_single(session, data, model_url, model_name, task_id, progr
         return {"error": str(e), "task_id": task_id}
 
 
-async def llm_invoke_batch(datasets, model_name, model_url="http://172.16.15.112:11434/api/chat",
+async def llm_invoke_batch(datasets, model_name, model_url="http://localhost:11434/api/generate",
                            batch_size=10, max_retries=3, max_concurrent=10):
     """프롬프트 배치에 대한 병렬 LLM 호출 (진행률 로깅 기능 추가)"""
     all_results = [None] * len(datasets)  # 순서 보존을 위한 결과 저장 리스트
