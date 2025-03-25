@@ -41,6 +41,8 @@ def parse_arguments():
                         help='최대 동시 요청 수 (ollama-api 명령 시 사용, 기본값: 10)')
     parser.add_argument('--max-retries', type=int, default=3,
                         help='최대 재시도 횟수 (ollama-api 명령 시 사용, 기본값: 3)')
+    parser.add_argument('--test-size', type=int, default=0,
+                        help='테스트집합 크기 (ollama-api 명령 시 사용, 기본값: 0[전체])')
     parser.add_argument('--eval-api', action='store_true', help='평가에 api 사용')
 
     # eval-csv 명령에 대한 추가 인수
@@ -63,6 +65,7 @@ if __name__ == "__main__":
     base_model = args.base_model
     finetuned_model = args.finetuned_model
     verifying_model = args.verifying_model
+    test_size = args.test_size
 
     program_start_time = time.time()
     timing_stats_manager.start_process("main")
@@ -114,7 +117,7 @@ if __name__ == "__main__":
 
         # 테스트 데이터셋 준비 시간 측정
         timing_stats_manager.start_process("prepare_test_dataset", f"command_{args.command}")
-        test_dataset = aux_local.prepare_test_dataset_origin(base_model, prefix)
+        test_dataset = aux_local.prepare_test_dataset_origin(base_model, prefix, test_size)
         prepare_time = timing_stats_manager.stop_process("prepare_test_dataset")
         logging.info(f"테스트 데이터셋 준비 완료: {prepare_time:.2f}초 소요")
 
@@ -146,8 +149,8 @@ if __name__ == "__main__":
             batch_size=batch_size,
             max_concurrent=max_concurrent,
             max_retries=max_retries,
-            ollama_url=args.ollama_url
-            # size=1
+            ollama_url=args.ollama_url,
+            test_size=test_size,
         )
         prepare_time = timing_stats_manager.stop_process("prepare_test_dataset")
         logging.info(f"테스트 데이터셋 준비 완료: {prepare_time:.2f}초 소요")
@@ -178,7 +181,7 @@ if __name__ == "__main__":
 
         # HTTP 테스트 준비 시간 측정
         timing_stats_manager.start_process("prepare_test_ollama", f"command_{args.command}")
-        test_dataset = aux_local.prepare_test_ollama(model_id, model_prefix)
+        test_dataset = aux_local.prepare_test_ollama(model_id, model_prefix, test_size)
         prepare_time = timing_stats_manager.stop_process("prepare_test_ollama")
         logging.info(f"HTTP 테스트 준비 완료: {prepare_time:.2f}초 소요")
 
@@ -230,7 +233,8 @@ if __name__ == "__main__":
             model_prefix,
             batch_size=batch_size,
             max_concurrent=max_concurrent,
-            max_retries=max_retries
+            max_retries=max_retries,
+            test_size=test_size,
         )
         prepare_time = timing_stats_manager.stop_process("prepare_test_dataset")
         logging.info(f"테스트 데이터셋 준비 완료: {prepare_time:.2f}초 소요")

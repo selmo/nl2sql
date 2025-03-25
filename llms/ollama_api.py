@@ -52,8 +52,6 @@ async def llm_invoke_single(session, data, model_url, model_name, task_id, progr
                 return {"error": error_text, "task_id": task_id}
 
             result = await response.json()
-            # logging.info("request: %s", request)
-            # logging.info("result: %s", result['response'])
             elapsed = time.time() - start_time
             progress_tracker.update_task_progress(task_id, "success", elapsed)
             result["task_id"] = task_id  # 태스크 ID 추가

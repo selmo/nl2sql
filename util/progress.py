@@ -41,7 +41,7 @@ class ProgressTracker:
         elif status == "failed":
             self.completed += 1
             self.failed += 1
-            self.pbar.update(1)
+            # self.pbar.update(1)
             error_msg = f": {error}" if error else ""
             self.logger.warning(f"태스크 #{task_id} 실패{error_msg}")
         elif status == "retry":

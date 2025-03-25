@@ -29,16 +29,23 @@ def extract_sql_queries(text: str) -> str:
 def clean_response(response, parser=None):
     clean_output = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
     if parser is None:
-        logging.info("cleaned_output: [%s] %s", type(clean_output), clean_output)
+        # logging.info("cleaned_output 1: [%s] %s", type(clean_output), clean_output)
+
         return clean_output
     else:
+        # logging.info("cleaned_output 2: [%s] %s", type(clean_output), clean_output)
         try:
             result = parser.parse(clean_output)
-            logging.debug("result: [%s] %s\n", type(result), result)
+            # logging.info("result 0: [%s] %s\n", type(result), result)
             return result
+        except TypeError as te:
+            logging.error("response 1: [TypeError] %s", response)
+            logging.error("error: %s", te)
+            logging.error("clean_output 3: %s", clean_output)
+            exit(0)
         except OutputParserException as e:
-            logging.error("response: %s", response)
-            logging.error("clean_output: %s", clean_output)
+            logging.error("response 2: %s", response)
+            logging.error("clean_output 4: %s", clean_output)
             query_match = extract_sql_queries(clean_output)
             logging.error("query: %s", query_match)
             sql_obj = SQL(
