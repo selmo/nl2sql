@@ -43,8 +43,6 @@ async def llm_invoke_single(session, data, model_url, model_name, task_id, progr
     prompt = make_prompt(model_name, data['context'], data['question'])
     request = make_request(model_name, prompt)
 
-    logging.info("request: %s", request)
-
     try:
         async with session.post(model_url, json=request) as response:
             if response.status != 200:
@@ -233,7 +231,7 @@ def llm_invoke_parallel(model, datasets, batch_size=10, max_retries=3, max_concu
         llm_invoke_batch(
             datasets,
             model,
-            f"{url}:11434/api/generate",
+            model_url=url,
             batch_size=batch_size,
             max_retries=max_retries,
             max_concurrent=max_concurrent

@@ -21,11 +21,11 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='모델 학습 및 평가 도구')
 
     # 공통 인수
-    parser.add_argument('command', choices=['train', 'test', 'eval', 'ollama-langchain', 'ollama-api', 'ollama-http', 'eval-csv'],
-                        help='실행할 명령 (train, test, eval, ollama-api, ollama-http, eval-csv)')
+    parser.add_argument('command', choices=['train', 'merge', 'test', 'eval', 'ollama-langchain', 'ollama-api', 'ollama-http', 'eval-csv'],
+                        help='실행할 명령 (train, merge, test, eval, ollama-api, ollama-http, eval-csv)')
     parser.add_argument('--prefix', type=str, default=".",
                         help='실행 데이터 디렉토리 접두사')
-    parser.add_argument('--ollama-url', type=str, default="172.16.15.112",
+    parser.add_argument('--ollama-url', type=str, default="http://localhost:11434/api/generate",
                         help='ollama server 주소')
     parser.add_argument('--base-model', type=str, default='qwq',
                         help='기본 모델 이름')
@@ -66,6 +66,12 @@ if __name__ == "__main__":
     finetuned_model = args.finetuned_model
     verifying_model = args.verifying_model
     test_size = args.test_size
+    ollama_url = args.ollama_url
+
+    # 병렬 처리 매개변수 설정
+    batch_size = args.batch_size
+    max_concurrent = args.max_concurrent
+    max_retries = args.max_retries
 
     program_start_time = time.time()
     timing_stats_manager.start_process("main")
@@ -108,13 +114,13 @@ if __name__ == "__main__":
         )
         timing_stats_manager.stop_process("autotrain")
 
-    elif args.command == 'test' or args.command == 'eval':
-        # finetuned_model = "LGAI-EXAONE/EXAONE-Deep-32B-AWQ"
+    elif args.command == 'merge':
         # 모델 병합 시간 측정
         timing_stats_manager.start_process("merge_model", f"command_{args.command}")
         merge_model(base_model, finetuned_model, prefix)
         timing_stats_manager.stop_process("merge_model")
 
+    elif args.command == 'test' or args.command == 'eval':
         # 테스트 데이터셋 준비 시간 측정
         timing_stats_manager.start_process("prepare_test_dataset", f"command_{args.command}")
         test_dataset = aux_local.prepare_test_dataset_origin(base_model, prefix, test_size)
@@ -123,33 +129,24 @@ if __name__ == "__main__":
 
         # 평가 시간 측정
         timing_stats_manager.start_process("evaluation", f"command_{args.command}")
-        evaluation(finetuned_model, verifying_model, test_dataset, prefix)
+        evaluation(verifying_model, test_dataset, prefix)
         eval_time = timing_stats_manager.stop_process("evaluation")
         logging.info(f"평가 완료: {eval_time:.2f}초 소요")
 
     elif args.command == 'ollama-api':
-        # 병렬 처리 매개변수 설정
-        batch_size = args.batch_size
-        max_concurrent = args.max_concurrent
-        max_retries = args.max_retries
-
         logging.info(f"병렬 처리 설정: 배치 크기 {batch_size}, 최대 동시 요청 {max_concurrent}, 최대 재시도 {max_retries}")
 
-        # 모델 병합 시간 측정
-        timing_stats_manager.start_process("merge_model", f"command_{args.command}")
-        model_id, model_prefix = merge_model(base_model, finetuned_model, prefix)
-        merge_time = timing_stats_manager.stop_process("merge_model")
-        logging.info(f"모델 병합 완료: {merge_time:.2f}초 소요")
-
+        model = base_model
+        model_prefix = path.join(prefix, "test")
         # 테스트 데이터셋 준비 시간 측정 (병렬 처리)
         timing_stats_manager.start_process("prepare_test_dataset", f"command_{args.command}")
         test_dataset = aux_local.prepare_test_dataset(
-            model_id,
+            model,
             model_prefix,
             batch_size=batch_size,
             max_concurrent=max_concurrent,
             max_retries=max_retries,
-            ollama_url=args.ollama_url,
+            ollama_url=ollama_url,
             test_size=test_size,
         )
         prepare_time = timing_stats_manager.stop_process("prepare_test_dataset")
@@ -157,13 +154,10 @@ if __name__ == "__main__":
 
         # 평가 시간 측정
         timing_stats_manager.start_process("evaluation", f"command_{args.command}")
-        result_prefix = f"{prefix}_{model_id.replace(':', '-')}_{verifying_model.replace(':', '-')}"
+        result_prefix = path.join(prefix, 'eval')
         api_key = "crR2uHiE9awuVzimCtwmCXG6apq_rsPhHBBfjt1PSts4VmcZyLEwCJv3FFWqCD4hp20KGDL6oeT3BlbkFJBR4xBLE6TLPOwXaUdRiEgzqwE96hHs6xNKZTVXdWrEbxuqUHUZe3neqOYSrHghB8K3NOzVrXMA"
 
-        if args.eval_api:
-            aux_local.evaluation_api(verifying_model, test_dataset, result_prefix, api_key=f"sk-proj-{api_key}")
-        else:
-            evaluation(model_id, verifying_model, test_dataset, result_prefix, api_key=f"sk-proj-{api_key}")
+        evaluation(verifying_model, test_dataset, result_prefix, api_key=f"sk-proj-{api_key}")
 
         eval_time = timing_stats_manager.stop_process("evaluation")
         logging.info(f"평가 완료: {eval_time:.2f}초 소요")
@@ -175,20 +169,20 @@ if __name__ == "__main__":
 
         # 모델 병합 시간 측정
         timing_stats_manager.start_process("merge_model", f"command_{args.command}")
-        model_id, model_prefix = merge_model(base_model, finetuned_model, prefix)
+        model, model_prefix = merge_model(base_model, finetuned_model, prefix)
         merge_time = timing_stats_manager.stop_process("merge_model")
         logging.info(f"모델 병합 완료: {merge_time:.2f}초 소요")
 
         # HTTP 테스트 준비 시간 측정
         timing_stats_manager.start_process("prepare_test_ollama", f"command_{args.command}")
-        test_dataset = aux_local.prepare_test_ollama(model_id, model_prefix, test_size)
+        test_dataset = aux_local.prepare_test_ollama(model, model_prefix, test_size)
         prepare_time = timing_stats_manager.stop_process("prepare_test_ollama")
         logging.info(f"HTTP 테스트 준비 완료: {prepare_time:.2f}초 소요")
 
         # 평가 시간 측정
         timing_stats_manager.start_process("evaluation", f"command_{args.command}")
-        result_prefix = f"{prefix}_{model_id.replace(':', '-')}_{verifying_model.replace(':', '-')}"
-        evaluation(model_id, verifying_model, test_dataset, result_prefix)
+        result_prefix = f"{prefix}_{model.replace(':', '-')}_{verifying_model.replace(':', '-')}"
+        evaluation(verifying_model, test_dataset, result_prefix)
         eval_time = timing_stats_manager.stop_process("evaluation")
         logging.info(f"평가 완료: {eval_time:.2f}초 소요")
 
@@ -222,14 +216,14 @@ if __name__ == "__main__":
 
         # 모델 병합 시간 측정
         timing_stats_manager.start_process("merge_model", f"command_{args.command}")
-        model_id, model_prefix = merge_model(base_model, finetuned_model, prefix)
+        model, model_prefix = merge_model(base_model, finetuned_model, prefix)
         merge_time = timing_stats_manager.stop_process("merge_model")
         logging.info(f"모델 병합 완료: {merge_time:.2f}초 소요")
 
         # 테스트 데이터셋 준비 시간 측정 (병렬 처리)
         timing_stats_manager.start_process("prepare_test_dataset", f"command_{args.command}")
         test_dataset = aux_local.prepare_test_dataset_langchain(
-            model_id,
+            model,
             model_prefix,
             batch_size=batch_size,
             max_concurrent=max_concurrent,
@@ -241,10 +235,10 @@ if __name__ == "__main__":
 
         # 평가 시간 측정
         timing_stats_manager.start_process("evaluation", f"command_{args.command}")
-        result_prefix = f"{prefix}_{model_id.replace(':', '-')}_{verifying_model.replace(':', '-')}"
+        result_prefix = f"{prefix}_{model.replace(':', '-')}_{verifying_model.replace(':', '-')}"
         # evaluation(model_id, verifying_model, test_dataset, result_prefix)
         api_key = "crR2uHiE9awuVzimCtwmCXG6apq_rsPhHBBfjt1PSts4VmcZyLEwCJv3FFWqCD4hp20KGDL6oeT3BlbkFJBR4xBLE6TLPOwXaUdRiEgzqwE96hHs6xNKZTVXdWrEbxuqUHUZe3neqOYSrHghB8K3NOzVrXMA"
-        evaluation(model_id, verifying_model, test_dataset, result_prefix, api_key=f"sk-proj-{api_key}")
+        evaluation(verifying_model, test_dataset, result_prefix, api_key=f"sk-proj-{api_key}")
         eval_time = timing_stats_manager.stop_process("evaluation")
         logging.info(f"평가 완료: {eval_time:.2f}초 소요")
 

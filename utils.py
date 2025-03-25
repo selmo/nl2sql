@@ -15,7 +15,7 @@ def change_responses_to_csv(responses, output_file='', prompt_column="prompt", r
     responses = []
 
     for json_data in responses:
-        logging.debug(f"json_data: {json_data}")
+        # logging.debug(f"json_data: {json_data}")
         prompts.append(json_data[0]['messages'][0]['content'])
         if model.lower().startswith('gpt') or model.startswith('o1') or model.startswith('o3'):
             responses.append(json_data[1]['choices'][0]['message']['content'])
@@ -37,12 +37,14 @@ def change_jsonl_to_csv(input_file, output_file='', prompt_column="prompt", resp
         for data in json_file:
             json_data = json.loads(data)
 
-            logging.debug(f"json_data: {json_data}")
-            prompts.append(json_data[0]['messages'][0]['content'])
+            # logging.info(f"json_data: {json_data}")
+            # prompts.append(json_data[0]['messages'][0]['content'])
+            prompts.append(json_data[0]['prompt'])
             if model.lower().startswith('gpt') or model.startswith('o1') or model.startswith('o3'):
                 responses.append(json_data[1]['choices'][0]['message']['content'])
             else:
-                responses.append(json_data[1]['message']['content'])
+                # responses.append(json_data[1]['message']['content'])
+                responses.append(json_data[1]['response'])
 
     dfs = pd.DataFrame({prompt_column: prompts, response_column: responses})
     logging.info(f"change_jsonl_to_csv: input_file={input_file}, output_file={output_file}")

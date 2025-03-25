@@ -87,13 +87,13 @@ if __name__ == "__main__":
         prepare_time = timing_stats_manager.stop_process("prepare_test_dataset")
         logging.info(f"테스트 데이터셋 준비 완료: {prepare_time:.2f}초 소요")
 
-        # # 평가 시간 측정
-        # timing_stats_manager.start_process("evaluation", f"command_{args.command}")
-        #
-        # evaluation(gen_model, eval_model, test_dataset, result_prefix, api_key=f"sk-proj-{api_key}")
-        #
-        # eval_time = timing_stats_manager.stop_process("evaluation")
-        # logging.info(f"평가 완료: {eval_time:.2f}초 소요")
+        # 평가 시간 측정
+        timing_stats_manager.start_process("evaluation", f"command_{args.command}")
+
+        evaluation(eval_model, test_dataset, result_prefix, api_key=f"sk-proj-{api_key}")
+
+        eval_time = timing_stats_manager.stop_process("evaluation")
+        logging.info(f"평가 완료: {eval_time:.2f}초 소요")
 
     elif args.command == 'ollama-http':
         # 모델 병합 시간 측정

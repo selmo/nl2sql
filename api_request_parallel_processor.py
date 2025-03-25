@@ -33,7 +33,6 @@ async def process_api_requests_from_file(
     # initialize logging
     logging.basicConfig(level=logging_level)
     logging.debug(f"Logging initialized at level {logging_level}")
-    logging.info('request_url: %s', request_url)
 
     # infer API endpoint and construct request header
     api_endpoint = api_endpoint_from_url(request_url)
@@ -138,6 +137,11 @@ async def process_api_requests_from_file(
                         try:
                             # get new request
                             request_json = json.loads(next(requests))
+
+                            # "index" 키가 있는 경우에만 삭제
+                            if "index" in request_json:
+                                del request_json["index"]
+
                             next_request = APIRequest(
                                 task_id=next(task_id_generator),
                                 request_json=request_json,

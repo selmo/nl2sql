@@ -3,6 +3,8 @@ import os
 from os import path
 from pathlib import Path
 
+from llms.prompt_generator import make_request
+
 
 def check_and_create_directory(filepath):
     if not Path(filepath).exists():
@@ -31,24 +33,26 @@ def make_request_jobs(model, prompts):
                  } for prompt in prompts
                 ]
     else:
-        jobs = [{"model": model,
-                 "stream": False,
-                 "messages": [
-                     {"role": "system",
-                      "content": prompt}
-                 ],
-                 "format": {
-                     "type": "object",
-                     "properties": {
-                         "resolve_yn": {
-                             "type": "string"
-                         }
-                     },
-                     "required": [
-                         "resolve_yn"
-                     ]
-                 }
-                 } for prompt in prompts
+        jobs = [ make_request(model, prompt, evaluation=True)
+        #   {"model": model,
+        #          "stream": False,
+        #          "messages": [
+        #              {"role": "system",
+        #               "content": prompt}
+        #          ],
+        #          "format": {
+        #              "type": "object",
+        #              "properties": {
+        #                  "resolve_yn": {
+        #                      "type": "string"
+        #                  }
+        #              },
+        #              "required": [
+        #                  "resolve_yn"
+        #              ]
+        #          }
+        #          }
+            for prompt in prompts
                 ]
     return jobs
 

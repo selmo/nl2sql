@@ -216,7 +216,7 @@ def prepare_test_dataset(model, prefix='', batch_size=10, max_concurrent=10, max
     filepath = path.join(prefix, "saved_results.jsonl")
 
     # 로그 파일 설정
-    log_filepath = path.join(prefix, "parallel_processing.log")
+    log_filepath = path.join(prefix, "test_processing.log")
     file_handler = logging.FileHandler(log_filepath)
     file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 

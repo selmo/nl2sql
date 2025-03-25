@@ -156,19 +156,33 @@ def make_requests(model, prompts):
                 ]
     return jobs
 
-def make_request(model_id, content: str):
-    return {"model": model_id,
-            "stream": False,
-            "prompt": content,
-            "format": {
-                "type": "object",
-                "properties": {
-                    "reasoning": {"type": "string"},
-                    "description": {"type": "string"},
-                    "gen_sql": {"type": "string"}
-                },
-                "required": ["reasoning", "description", "gen_sql"]
-            }}
+def make_request(model_id, content: str, evaluation: bool = False):
+    if evaluation:
+        return {"model": model_id,
+                "stream": False,
+                "prompt": content,
+                "format": {
+                    "type": "object",
+                    "properties": {
+                        "resolve_yn": {
+                            "type": "string"
+                        }
+                    },
+                    "required": ["resolve_yn"]
+                }}
+    else:
+        return {"model": model_id,
+                "stream": False,
+                "prompt": content,
+                "format": {
+                    "type": "object",
+                    "properties": {
+                        "reasoning": {"type": "string"},
+                        "description": {"type": "string"},
+                        "gen_sql": {"type": "string"}
+                    },
+                    "required": ["reasoning", "description", "gen_sql"]
+                }}
 
     # if model_id.lower().startswith('sqlcoder') or model_id.lower().startswith('exaone'):
     #     payload = {

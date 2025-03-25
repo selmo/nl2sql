@@ -140,7 +140,7 @@ def merge_model(base_model, finetuned_model, prefix=''):
     return finetuned_model, f"{prefix}_{finetuned_model.replace(':', '-')}"
 
 
-def evaluation(ft_model, verifying_model, dataset, prefix, api_key=""):
+def evaluation(model, dataset, prefix, api_key=""):
     eval_filepath = "text2sql.jsonl"
 
     logging.info("DataFrame:\n%s", dataset)
@@ -152,23 +152,22 @@ def evaluation(ft_model, verifying_model, dataset, prefix, api_key=""):
     results_path = path.join(prefix, 'results')
     requests_filepath = clean_filepath(eval_filepath, prefix=requests_path)
     save_filepath = clean_filepath(eval_filepath, prefix=results_path)
-    output_file = clean_filepath(f"{ft_model}.csv", prefix=results_path)
+    output_file = clean_filepath(f"{model}.csv", prefix=results_path)
     check_and_create_directory(path.dirname(requests_filepath))
     check_and_create_directory(path.dirname(save_filepath))
     check_and_create_directory(path.dirname(output_file))
 
     # 평가를 위한 requests.jsonl 생성
     prompts = make_requests_for_evaluation(dataset)
-
-    jobs = make_request_jobs(verifying_model, prompts)
+    jobs = make_request_jobs(model, prompts)
 
     with open(requests_filepath, "w") as f:
         for job in jobs:
             json_string = json.dumps(job)
             f.write(json_string + "\n")
 
-    url = "https://api.openai.com/v1/chat/completions" if verifying_model.lower().startswith(
-        'gpt') or verifying_model.startswith('o1') or verifying_model.startswith('o3') else "http://172.16.15.112:11434/api/chat"
+    url = "https://api.openai.com/v1/chat/completions" if model.lower().startswith(
+        'gpt') or model.startswith('o1') or model.startswith('o3') else "http://172.16.15.112:11434/api/generate"
 
     api_request_parallel_processor.process_by_file(
         requests_filepath=requests_filepath,
@@ -186,7 +185,7 @@ def evaluation(ft_model, verifying_model, dataset, prefix, api_key=""):
         output_file,
         # "prompt",
         response_column="resolve_yn",
-        model=verifying_model
+        model=model
     )
 
     base_eval['resolve_yn'] = base_eval['resolve_yn'].apply(lambda x: json.loads(x)['resolve_yn'])

@@ -40,36 +40,39 @@ def prepare_test_dataset(model, prefix='', batch_size=10, max_concurrent=10, max
 
     logging.info(f"병렬 처리 로그를 {log_filepath}에 기록합니다.")
 
+    # 데이터셋 불러오기
+    dataset = load_dataset("shangrilar/ko_text2sql", "origin")['test']
+    dataset = dataset.to_pandas()
+    if test_size > 0:
+        dataset = dataset[:test_size]
+
     if not Path(requests_file).exists():
         logging.info(f"파일이 존재하지 않습니다. 데이터 파일 생성 중: {requests_file}")
-
-        # 데이터셋 불러오기
-        dataset = load_dataset("shangrilar/ko_text2sql", "origin")['test']
-        dataset = dataset.to_pandas()
-        if test_size > 0:
-            dataset = dataset[:test_size]
 
         # 병렬 호출 실행
         logging.info(f"총 {len(dataset)}개 데이터셋에 대한 병렬 처리를 시작합니다.")
 
-        # df.loc[idx, 'prompt'] = prompt
         jobs = []
+        # df.loc[idx, 'prompt'] = prompt
         for idx, data in dataset.iterrows():
             # 평가를 위한 requests.jsonl 생성
             prompt = make_prompt(model, data['context'], data['question'])
+            dataset.loc[idx, 'prompt'] = prompt
+            dataset.loc[idx, 'index'] = idx
             job = make_request(model, prompt)
-            jobs.append(job)
+            jobs.append((idx, job))
 
         with open(requests_file, "w") as f:
-            for job in jobs:
+            for idx, job in jobs:
+                job["index"] = idx
                 json_string = json.dumps(job)
                 f.write(json_string + "\n")
 
-        url = "https://api.openai.com/v1/chat/completions" if model.lower().startswith(
-            'gpt') or model.startswith('o1') or model.startswith(
-            'o3') else "http://172.16.15.112:11434/api/generate"
+    url = "https://api.openai.com/v1/chat/completions" if model.lower().startswith(
+        'gpt') or model.startswith('o1') or model.startswith(
+        'o3') else "http://172.16.15.112:11434/api/generate"
 
-        logging.info('URL: %s', url)
+    if not Path(results_file).exists():
         api_request_parallel_processor.process_by_file(
             requests_filepath=requests_file,
             save_filepath=results_file,
@@ -83,19 +86,34 @@ def prepare_test_dataset(model, prefix='', batch_size=10, max_concurrent=10, max
             max_concurrent_requests=max_concurrent,
             batch_size=batch_size,
         )
-        # 결과 처리
-        # results, success_count, error_count = make_result(responses, df)
+
+    prompts = []
+    responses = []
+    with open(results_file, 'r') as json_file:
+        for data in json_file:
+            # logging.info(f"data: {data}")
+            json_data = json.loads(data)
+            # logging.info(f"json_data: {json_data}")
+            if model.lower().startswith('gpt') or model.startswith('o1') or model.startswith('o3'):
+                prompts.append(json_data[0]['messages'][0]['content'])
+                responses.append(json_data[1]['choices'][0]['message']['content'])
+            else:
+                prompts.append(json_data[0]['prompt'])
+                responses.append(json_data[1]['response'])
+
+    # 결과 처리
+    results, success_count, error_count = make_result(responses, dataset)
         #
         # logging.info(f"결과 처리 완료: 성공 {success_count}개, 오류 {error_count}개")
 
         # 결과 저장
         # results.to_json(requests_file, orient='records', lines=True)
         # logging.info(f"파일 저장 완료: {requests_file}")
-    else:
+    # else:
         # logging.info(f"파일이 존재합니다. 데이터 파일 로딩 중: {requests_file}")
         # results = pd.read_json(requests_file, lines=True)
         # logging.info(f"데이터 컬럼: {results.keys()}")
-        logging.info("파일 로딩 완료.")
+        # logging.info("파일 로딩 완료.")
 
     # 로그 핸들러 제거
     root_logger.removeHandler(file_handler)
