@@ -42,6 +42,7 @@ async def llm_invoke_single(session, data, model_url, model_name, task_id, progr
 
     prompt = make_prompt(model_name, data['context'], data['question'])
     request = make_request(model_name, prompt)
+    logging.debug("Request: %s", request)
 
     try:
         async with session.post(model_url, json=request) as response:
@@ -220,9 +221,10 @@ async def llm_invoke_jobs_batch(model_name, jobs, model_url="http://172.16.15.11
     return all_results
 
 
-def llm_invoke_parallel(model, datasets, batch_size=10, max_retries=3, max_concurrent=10, url="http://localhost"):
+def llm_invoke_parallel(model, datasets, batch_size=10, max_retries=3, max_concurrent=10, url="http://localhost:11434"):
     """병렬 처리를 위한 래퍼 함수 (로깅 기능 추가)"""
     logging.info(f"병렬 처리 시작: 총 {len(datasets)}개 요청 (배치 크기: {batch_size}, 최대 동시 요청: {max_concurrent})")
+    # logging.info(f"API URL: %s", url)
 
     start_time = time.time()
 

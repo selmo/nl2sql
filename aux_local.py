@@ -10,7 +10,7 @@ from llms import prompt_generator
 from llms.ollama_api import llm_invoke_parallel, llm_invoke_jobs_parallel
 from llms.prompt_generator import sql_parser, SQL, make_prompt
 from llms.response_processor import make_result, clean_response
-from util_common import clean_filepath, check_and_create_directory, make_requests_for_evaluation
+from util_common import clean_filepath, check_and_create_directory, make_prompts_for_evaluation
 from langchain_core.output_parsers import PydanticOutputParser
 
 from datasets import load_dataset
@@ -62,94 +62,6 @@ def prepare_dataset(model, parser, messages):
 
     return results
 
-
-# def prepare_dataset_test(model):
-#     model = OllamaLLM(model=model, temperature=0.0)
-#
-#     # Define your desired data structure.
-#     class Joke(BaseModel):
-#         setup: str = Field(description="question to set up a joke")
-#         punchline: str = Field(description="answer to resolve the joke")
-#
-#         # You can add custom validation logic easily with Pydantic.
-#         @model_validator(mode="before")
-#         @classmethod
-#         def question_ends_with_question_mark(cls, values: dict) -> dict:
-#             setup = values.get("setup")
-#             if setup and setup[-1] != "?":
-#                 raise ValueError("Badly formed question!")
-#             return values
-#
-#     # Set up a parser + inject instructions into the prompt template.
-#     parser = PydanticOutputParser(pydantic_object=Joke)
-#
-#     prompt = PromptTemplate(
-#         template="Answer the user query.\n{format_instructions}\n{query}\n",
-#         input_variables=["query"],
-#         partial_variables={"format_instructions": parser.get_format_instructions()},
-#     )
-#
-#     logging.info('prompt: %s', parser.get_format_instructions())
-#
-#     # And a query intended to prompt a language model to populate the data structure.
-#     prompt_and_model = prompt | model
-#     output = prompt_and_model.invoke({"query": "Tell me a joke."})
-#     logging.info('output: %s', output)
-#     result = parser.invoke(output)
-#     logging.info('result: %s', result)
-
-
-# def prepare_test_dataset_parallel(model, prefix=''):
-#     """병렬 처리를 사용한 테스트 데이터셋 준비"""
-#     check_and_create_directory(prefix)
-#     filepath = path.join(prefix, "saved_results.jsonl")
-#
-#     if not Path(filepath).exists():
-#         logging.info(f"파일이 존재하지 않습니다. 데이터 파일 생성 중: {filepath}")
-#
-#         # 데이터셋 불러오기
-#         df = load_dataset("shangrilar/ko_text2sql", "origin")['test']
-#         df = df.to_pandas()
-#         df = df[:50]  # 필요한 경우 샘플 수 조정
-#
-#         # 프롬프트 목록 생성
-#         prompts = []
-#         for _, row in df.iterrows():
-#             prompts.append(row)
-#
-#         # 결과 처리
-#         parser = PydanticOutputParser(pydantic_object=SQL)
-#
-#         # 병렬 호출 실행
-#         results = llm_invoke_parallel(model, prompts, template, parser)
-#
-#         for idx, result in enumerate(results):
-#             try:
-#                 if 'message' in result and 'content' in result['message']:
-#                     content = result['message']['content']
-#                     cleaned_result = clean_response(parser, content)
-#                     df.loc[idx, 'gen_sql'] = cleaned_result.gen_sql
-#                 elif 'error' in result:
-#                     logging.error(f"오류 응답: {result['error']}")
-#                     df.loc[idx, 'gen_sql'] = ''
-#                 else:
-#                     logging.warning(f"예상치 못한 응답 형식: {result}")
-#                     df.loc[idx, 'gen_sql'] = ''
-#             except Exception as e:
-#                 logging.error(f"결과 처리 중 오류 발생: {str(e)}")
-#                 df.loc[idx, 'gen_sql'] = ''
-#
-#         # 결과 저장
-#         df.to_json(filepath, orient='records', lines=True)
-#         logging.info(f"파일 저장 완료: {filepath}")
-#     else:
-#         logging.info(f"파일이 존재합니다. 데이터 파일 로딩 중: {filepath}")
-#         df = pd.read_json(filepath, lines=True)
-#         logging.info(f"데이터 컬럼: {df.keys()}")
-#         logging.info(f"데이터: {df}")
-#         logging.info("파일 로딩 완료.")
-#
-#     return df
 def prepare_test_dataset_origin(model, prefix='', test_size=0):
     df_filepath = path.join(prefix, f"{model}.jsonl")
     util_common.check_and_create_directory(path.dirname(df_filepath))
@@ -210,7 +122,7 @@ def prepare_test_dataset_origin(model, prefix='', test_size=0):
     return df
 
 
-def prepare_test_dataset(model, prefix='', batch_size=10, max_concurrent=10, max_retries=3, test_size=0, ollama_url=None):
+def prepare_test_dataset(model, prefix='', batch_size=10, max_concurrent=10, max_retries=3, test_size=None, ollama_url=None):
     """병렬 처리를 사용한 테스트 데이터셋 준비 (진행률 로깅 기능 추가)"""
     check_and_create_directory(prefix)
     filepath = path.join(prefix, "saved_results.jsonl")
@@ -232,7 +144,7 @@ def prepare_test_dataset(model, prefix='', batch_size=10, max_concurrent=10, max
         # 데이터셋 불러오기
         df = load_dataset("shangrilar/ko_text2sql", "origin")['test']
         df = df.to_pandas()
-        if test_size > 0:
+        if test_size is not None:
             df = df[:test_size]
 
         # 프롬프트 목록 생성
@@ -510,7 +422,7 @@ def evaluation_api(model, dataset, prefix='', batch_size=10, max_concurrent=10, 
     requests_filepath = clean_filepath(filepath, prefix=requests_path)
     check_and_create_directory(path.dirname(requests_filepath))
 
-    prompts = make_requests_for_evaluation(dataset)
+    prompts = make_prompts_for_evaluation(dataset)
     jobs = util_common.make_request_jobs(model, prompts)
 
     with open(requests_filepath, "w") as f:

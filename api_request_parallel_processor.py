@@ -341,6 +341,7 @@ def process_by_file(
         logging.error(f"Error counting requests in file: {e}")
         return
 
+    logging.info(f"API URL: %s", request_url)
     logging.info(f"Processing {total_requests} requests from {requests_filepath}")
     logging.info(f"Results will be saved to {save_filepath}")
     logging.info(f"Rate limits: {max_requests_per_minute} requests/min, {max_tokens_per_minute} tokens/min")
@@ -654,7 +655,7 @@ class APIRequest:
     ):
         """Calls the API and handles various error conditions."""
         logger = logging.getLogger(__name__)
-        logger.info(f"Starting request #{self.task_id}")
+        # logger.info(f"Starting request #{self.task_id}")
 
         # 요청 시작 시 상태 업데이트
         if progress_tracker:
@@ -740,7 +741,7 @@ class APIRequest:
                     logger.warning(f"Rate limit error for request #{self.task_id}: {error_message}")
                     raise ConnectionError(f"Rate limit error: {error_message}")
             else:
-                logger.info(f"Response #{self.task_id}: OK")
+                # logger.info(f"Response #{self.task_id}: OK")
                 result_data = [self.request_json, response_json, self.metadata] if self.metadata else [
                     self.request_json, response_json]
 

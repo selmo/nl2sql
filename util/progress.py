@@ -19,7 +19,7 @@ class ProgressTracker:
         self.logger = logging.getLogger("BatchProcessor")
         if not self.logger.handlers:
             handler = logging.StreamHandler()
-            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            formatter = logging.Formatter('%(asctime)s [%(name)s][%(levelname)s] %(message)s')
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
             self.logger.setLevel(logging.INFO)

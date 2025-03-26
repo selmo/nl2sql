@@ -2,20 +2,11 @@ import json
 import logging
 import pandas as pd
 
-
-# 로깅 설정 (원하는 포맷과 레벨로 조정 가능)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
-
-
 def change_responses_to_csv(responses, output_file='', prompt_column="prompt", response_column="response", model="gpt"):
     prompts = []
     responses = []
 
     for json_data in responses:
-        # logging.debug(f"json_data: {json_data}")
         prompts.append(json_data[0]['messages'][0]['content'])
         if model.lower().startswith('gpt') or model.startswith('o1') or model.startswith('o3'):
             responses.append(json_data[1]['choices'][0]['message']['content'])
@@ -32,18 +23,14 @@ def change_jsonl_to_csv(input_file, output_file='', prompt_column="prompt", resp
     prompts = []
     responses = []
 
-    logging.info(f"change_jsonl_to_csv: input_file={input_file}")
     with open(input_file, 'r') as json_file:
         for data in json_file:
             json_data = json.loads(data)
-
-            # logging.info(f"json_data: {json_data}")
-            # prompts.append(json_data[0]['messages'][0]['content'])
-            prompts.append(json_data[0]['prompt'])
             if model.lower().startswith('gpt') or model.startswith('o1') or model.startswith('o3'):
+                prompts.append(json_data[0]['messages'][0]['content'])
                 responses.append(json_data[1]['choices'][0]['message']['content'])
             else:
-                # responses.append(json_data[1]['message']['content'])
+                prompts.append(json_data[0]['prompt'])
                 responses.append(json_data[1]['response'])
 
     dfs = pd.DataFrame({prompt_column: prompts, response_column: responses})

@@ -1,9 +1,68 @@
-import json
+import argparse
 import os
-from os import path
+import re
+from os.path import join, exists
 from pathlib import Path
-
 from llms.prompt_generator import make_request
+
+
+def get_api_url(input_url: str, model: str = '') -> str:
+    if model.lower().startswith('gpt') or model.lower().startswith('o1') or model.lower().startswith('o3'):
+        return "https://api.openai.com/v1/chat/completions"
+
+    # 기본값 설정
+    default_protocol = "http://"
+    default_port = "11434"
+    api_path = "api/generate"
+
+    # 빈 문자열일 경우 기본 URL 반환
+    if not input_url:
+        return f"{default_protocol}localhost:{default_port}/{api_path}"
+
+    # URL에 프로토콜이 없는 경우 기본 프로토콜을 붙여준다
+    if not re.match(r"^[a-zA-Z]+://", input_url):
+        # Fix: removed the extra slash
+        input_url = f"{default_protocol}{input_url}"
+
+    # 호스트 부분 추출
+    match = re.match(r"^(https?://)?([^:/]+)(?::(\d+))?", input_url)
+    if match:
+        protocol = match.group(1) or default_protocol
+        host = match.group(2)
+        port = match.group(3) or default_port
+        normalized_url = f"{protocol}{host}:{port}/{api_path}"
+        return normalized_url
+
+    # 기본 처리
+    return f"{default_protocol}localhost:{default_port}/{api_path}"
+# def get_api_url(input_url: str, model:str = '') -> str:
+#     if model.lower().startswith('gpt') or model.lower().startswith('o1') or model.lower().startswith('o3'):
+#         return "https://api.openai.com/v1/chat/completions"
+#
+#     # 기본값 설정
+#     default_protocol = "http://"
+#     default_port = "11434"
+#     api_path = "api/generate"
+#
+#     # 빈 문자열일 경우 기본 URL 반환
+#     if not input_url:
+#         return f"{default_protocol}localhost:{default_port}/{api_path}"
+#
+#     # URL에 프로토콜이 없는 경우 추가
+#     if not re.match(r"^[a-zA-Z]+://", input_url):
+#         input_url = f"{default_protocol}/{input_url}"
+#
+#     # 호스트 부분 추출
+#     match = re.match(r"^(https?://)?([^:/]+)(?::(\d+))?", input_url)
+#     if match:
+#         protocol = match.group(1) or default_protocol
+#         host = match.group(2)
+#         port = match.group(3) or "11434"
+#         normalized_url = f"{protocol}{host}:{port}/{api_path}"
+#         return normalized_url
+#
+#     # 기본 처리
+#     return f"{default_protocol}localhost:{default_port}/{api_path}"
 
 
 def check_and_create_directory(filepath):
@@ -13,8 +72,8 @@ def check_and_create_directory(filepath):
 
 
 def clean_filepath(filepath, prefix=''):
-    filepath = path.join(prefix, filepath)
-    if path.exists(filepath):
+    filepath = join(prefix, filepath)
+    if exists(filepath):
         os.remove(filepath)
 
     return filepath
@@ -57,7 +116,7 @@ def make_request_jobs(model, prompts):
     return jobs
 
 
-def make_requests_for_evaluation(df):
+def make_prompts_for_evaluation(df):
     prompts = []
     for idx, row in df.iterrows():
         prompts.append(
@@ -74,10 +133,11 @@ gen_sql: {row['gen_sql']}"""
     return prompts
 
 
+# model: str,
+# project_name: str,
+# data_path: str,
 def autotrain(
-        model: str,
-        project_name: str,
-        data_path: str,
+        option,
         text_column: str,
         lr: float,
         batch_size: int,
@@ -97,9 +157,9 @@ def autotrain(
     args = [
         "llms",
         "--train",
-        "--model", model,
-        "--project_name", project_name,
-        "--data_path", data_path,
+        "--model", option.base_model,
+        "--project_name", option.finetuned_model,
+        "--data_path", join(option.prefix, 'data'),
         "--text_column", text_column,
         "--lr", str(lr),
         "--batch_size", str(batch_size),

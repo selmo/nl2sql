@@ -1,4 +1,5 @@
 from langchain_core.output_parsers import PydanticOutputParser
+from pandas import DataFrame
 from pydantic import BaseModel, Field, model_validator
 
 template = """\
@@ -115,6 +116,7 @@ class SQL(BaseModel):
 
 sql_parser = PydanticOutputParser(pydantic_object=SQL)
 
+
 def make_prompt(model_id: str, schema:str, question:str):
     if model_id.lower().startswith('sqlcoder'):
         return sqlcoder_template.format(schema=schema, question=question)
@@ -122,119 +124,55 @@ def make_prompt(model_id: str, schema:str, question:str):
         return template.format(ddl=schema, request=question, format_instructions=sql_parser.get_format_instructions())
 
 
-def make_requests(model, prompts):
-    if model.startswith('gpt'):
-        jobs = [{"model": model,
-                 "response_format": {
-                     "type": "json_object"
-                 },
-                 "messages": [
-                     {"role": "system",
-                      "content": prompt}
-                 ]
-                 } for prompt in prompts
-                ]
-    else:
-        jobs = [{"model": model,
-                 "stream": False,
-                 "messages": [
-                     {"role": "system",
-                      "content": prompt}
-                 ],
-                 "format": {
-                     "type": "object",
-                     "properties": {
-                         "sql": {
-                             "type": "string"
-                         }
-                     },
-                     "required": [
-                         "sql"
-                     ]
-                 }
-                 } for prompt in prompts
-                ]
-    return jobs
+def make_prompts_for_evaluation(df):
+    prompts = []
+    for idx, row in df.iterrows():
+        prompts.append(
+            """Based on below DDL and Question, evaluate gen_sql can resolve Question. 
+If gen_sql and gt_sql do equal job, return "yes" else return "no". Output JSON Format: {"resolve_yn": ""}""" +
+            f"""
 
-def make_request(model_id, content: str, evaluation: bool = False):
-    if evaluation:
+DDL: {row['context']}
+Question: {row['question']}
+gt_sql: {row['answer']}
+gen_sql: {row['gen_sql']}"""
+        )
+
+    return prompts
+
+def make_request(model_id, prompt: str, gpt_model: bool = False, evaluation: bool = False):
+    if gpt_model:
         return {"model": model_id,
-                "stream": False,
-                "prompt": content,
-                "format": {
-                    "type": "object",
-                    "properties": {
-                        "resolve_yn": {
-                            "type": "string"
-                        }
-                    },
-                    "required": ["resolve_yn"]
-                }}
-    else:
-        return {"model": model_id,
-                "stream": False,
-                "prompt": content,
-                "format": {
-                    "type": "object",
+                "response_format": {
+                    "type": "json_object"
+                },
+                "messages": [
+                    {"role": "system",
+                     "content": prompt}]
+                }
+
+    eval_format = {"type": "object",
+                   "properties": {
+                       "resolve_yn": {"type": "string"}
+                   },
+                   "required": ["resolve_yn"]
+                  }
+    trans_format = {"type": "object",
                     "properties": {
                         "reasoning": {"type": "string"},
                         "description": {"type": "string"},
                         "gen_sql": {"type": "string"}
                     },
                     "required": ["reasoning", "description", "gen_sql"]
-                }}
+                   }
+    return {"model": model_id,
+            "stream": False,
+            "prompt": prompt,
+            "format": eval_format if evaluation else trans_format}
 
-    # if model_id.lower().startswith('sqlcoder') or model_id.lower().startswith('exaone'):
-    #     payload = {
-    #         "model": model_id,
-    #         "stream": False,
-    #         "prompt": content,
-    #         "format": {
-    #             "type": "object",
-    #             "properties": {
-    #                 "reasoning": {"type": "string"},
-    #                 "description": {"type": "string"},
-    #                 "gen_sql": {"type": "string"}
-    #             },
-    #             "required": ["reasoning", "description", "gen_sql"]
-    #         }
-    #     }
-    # else:
-    #     payload = {
-    #         "model": model_id,
-    #         "stream": False,
-    #         "messages": [
-    #             {"role": "system", "content": content}
-    #         ],
-    #         "format": {
-    #             "type": "object",
-    #             "properties": {
-    #                 "reasoning": {"type": "string"},
-    #                 "description": {"type": "string"},
-    #                 "gen_sql": {"type": "string"}
-    #             },
-    #             "required": ["reasoning", "description", "gen_sql"]
-    #         }
-    #     }
-    # return payload
-        # payload = {
-        #         "model": model_name,
-        #         "stream": False,
-        #         "messages": [
-        #             {"role": "system", "content": template.format(
-        #                 format_instructions=parser.get_format_instructions(),
-        #                 ddl=data['context'],
-        #                 request=data['question'],
-        #                 sql=''
-        #             )}
-        #         ],
-        #         "format": {
-        #             "type": "object",
-        #             "properties": {
-        #                 "reasoning": {"type": "string"},
-        #                 "description": {"type": "string"},
-        #                 "gen_sql": {"type": "string"}
-        #             },
-        #             "required": ["reasoning", "description", "gen_sql"]
-        #         }
-        #     }
+
+def make_request_jobs(model: str, dataset: DataFrame, evaluation=False):
+    prompts = make_prompts_for_evaluation(dataset)
+    gpt_model = True if model.lower().startswith('gpt') or model.lower().startswith('o1') or model.lower().startswith('o3') else False
+
+    return [make_request(model, prompt, gpt_model=gpt_model, evaluation=evaluation) for prompt in prompts]
