@@ -26,11 +26,17 @@ def parse_arguments():
     parser.add_argument('--max-retries', type=int, default=10,
                         help='최대 재시도 횟수 (ollama-api 명령 시 사용, 기본값: 10)')
     parser.add_argument('--test-size', type=int, default=None,
-                        help='테스트집합 크기 (ollama-api 명령 시 사용, 기본값: 0[전체])')
-    # parser.add_argument('--eval-api', action='store_true', help='평가에 api 사용')
+                        help='테스트집합 크기 (ollama-api 명령 시 사용)')
+    parser.add_argument('--test-dataset', type=str, default="Spider",
+                        help='테스트 데이터셋 이름 (예: Spider, WikiSQL, BIRD)')
+    parser.add_argument('--results-file', type=str, default="[PREFIX]/nl2sql_eval_results.csv",
+                        help='평가 결과를 저장할 CSV 파일 이름')
 
-    # eval-csv 명령에 대한 추가 인수
-    parser.add_argument('--csv-path', type=str, help='평가할 CSV 파일 경로 (eval-csv 명령 시 필수)')
+    # 모델 예열 관련 옵션 추가
+    parser.add_argument('--warmup-model', action='store_true', default=True,
+                        help='배치 처리 전 모델 예열 실행 (기본값: True)')
+    parser.add_argument('--no-warmup-model', action='store_false', dest='warmup_model',
+                        help='배치 처리 전 모델 예열 비활성화')
 
     return parser.parse_args()
 

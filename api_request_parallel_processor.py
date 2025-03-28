@@ -20,8 +20,9 @@ async def process_api_requests_from_file(
         token_encoding_name: str,
         max_attempts: int,
         logging_level: int,
-        max_concurrent_requests: int = 10,  # 추가: 동시 요청 수 제한
-        progress_tracker: ProgressTracker = None,  # 추가: 진행률 추적기
+        max_concurrent_requests: int = 10,  # 동시 요청 수 제한
+        progress_tracker: ProgressTracker = None,  # 진행률 추적기
+        response_processor=None,  # 응답 처리 함수 추가
 ):
     """Processes API requests in parallel, throttling to stay under rate limits."""
     # constants
@@ -95,6 +96,7 @@ async def process_api_requests_from_file(
                     retry_queue=queue_of_requests_to_retry,
                     save_filepath=save_filepath,
                     status_tracker=status_tracker,
+                    response_processor=response_processor,  # 응답 처리 함수 전달
                 )
 
                 # 성공 시 상태 업데이트
@@ -309,7 +311,9 @@ def process_by_file(
         max_attempts: int = 5,
         logging_level: int = logging.INFO,
         max_concurrent_requests: int = 10,  # 추가: 동시 요청 수 제한
-        batch_size: int = 20,  # 추가: 배치 크기 매개변수
+        batch_size: int = 20,  # 배치 크기 매개변수
+        response_processor=None,  # 응답 처리 함수 추가
+        prefix: str = ".",  # 로그 디렉토리 경로
 ):
     """
     Process a batch of API requests from a JSONL file with rate limiting and parallel execution.
@@ -326,6 +330,8 @@ def process_by_file(
         logging_level: Logging level (e.g., logging.INFO).
         max_concurrent_requests: Maximum number of concurrent API requests.
         batch_size: Size of processing batches for progress tracking.
+        response_processor: Function to process API responses.
+        prefix: Directory prefix for logs and other files.
     """
     # 결과 파일 경로 설정
     if save_filepath is None:
@@ -353,7 +359,7 @@ def process_by_file(
 
     # ProgressTracker 초기화
     progress_tracker = ProgressTracker(total_requests, batch_size)
-    logging.info(f"Using batch size of {batch_size} for progress tracking")
+    logging.debug(f"Using batch size of {batch_size} for progress tracking")
 
     try:
         # 비동기 처리 실행
@@ -370,6 +376,7 @@ def process_by_file(
                 logging_level=logging_level,
                 max_concurrent_requests=max_concurrent_requests,  # 동시 요청 수 제한 전달
                 progress_tracker=progress_tracker,  # 진행률 추적기 전달
+                response_processor=response_processor,  # 응답 처리 함수 전달
             )
         )
     except KeyboardInterrupt:
@@ -651,11 +658,11 @@ class APIRequest:
             status_tracker: StatusTracker,
             save_filepath: str = None,
             timeout: int = 60,
-            progress_tracker: ProgressTracker = None,  # 추가: 진행률 추적기
+            progress_tracker: ProgressTracker = None,
+            response_processor=None,  # 추가: 응답 처리 함수
     ):
         """Calls the API and handles various error conditions."""
         logger = logging.getLogger(__name__)
-        # logger.info(f"Starting request #{self.task_id}")
 
         # 요청 시작 시 상태 업데이트
         if progress_tracker:
@@ -665,18 +672,19 @@ class APIRequest:
 
         error = None
         result_data = None
+        processed_result = None  # 처리된 결과를 저장할 변수
 
         try:
-            # Make the API call
+            # API 호출
             try:
                 async with session.post(
                         url=request_url,
                         headers=request_header,
                         json=self.request_json,
                         timeout=timeout,
-                        raise_for_status=False  # Changed to handle status codes explicitly
+                        raise_for_status=False
                 ) as http_response:
-                    # Check for HTTP error status codes
+                    # HTTP 에러 상태 코드 확인
                     if http_response.status >= 400:
                         error_text = await http_response.text()
                         raise aiohttp.ClientResponseError(
@@ -689,88 +697,104 @@ class APIRequest:
 
                     response_json = await http_response.json()
 
+                    # 응답 처리 (즉시 처리)
+                    if response_processor and not "error" in response_json:
+                        try:
+                            processed_result = response_processor(response_json, self.metadata)
+                        except Exception as process_error:
+                            logger.error(f"응답 처리 중 오류 발생 (요청 #{self.task_id}): {str(process_error)}")
+                            # 처리 오류도 재시도 요인으로 간주
+                            raise ValueError(f"응답 처리 오류: {str(process_error)}")
+
                     # 성공 시 상태 업데이트
                     if progress_tracker:
                         elapsed = time.time() - start_time
                         progress_tracker.update_task_progress(self.task_id, "success", elapsed=elapsed)
 
             except aiohttp.ClientConnectionError as e:
-                logger.warning(f"Request #{self.task_id} connection error: {str(e)}")
-                raise ConnectionError(f"Server connection error: {str(e)}")
+                logger.warning(f"요청 #{self.task_id} 연결 오류: {str(e)}")
+                raise ConnectionError(f"서버 연결 오류: {str(e)}")
             except aiohttp.ClientResponseError as e:
-                logger.warning(f"Request #{self.task_id} HTTP error: {e.status} - {e.message}")
-                raise ConnectionError(f"HTTP error {e.status}: {e.message}")
+                logger.warning(f"요청 #{self.task_id} HTTP 오류: {e.status} - {e.message}")
+                raise ConnectionError(f"HTTP 오류 {e.status}: {e.message}")
             except asyncio.TimeoutError:
-                logger.warning(f"Request #{self.task_id} timeout error")
-                # 타임아웃 발생 시 명확한 처리
+                logger.warning(f"요청 #{self.task_id} 시간 초과")
+                # 타임아웃 발생 시 재시도 처리
                 if self.attempts_left > 0:
                     self.attempts_left -= 1
-                    # 직접 재시도 큐에 추가
                     await retry_queue.put(self)
-                    logger.info(f"Request #{self.task_id} queued for retry ({self.attempts_left} attempts left)")
+                    logger.info(f"요청 #{self.task_id} 재시도 큐에 추가됨 (남은 시도: {self.attempts_left})")
                     return None
                 else:
                     # 재시도 횟수 소진
-                    error_data = [self.request_json, {"error": "Request timed out after all retries"}, self.metadata]
+                    error_data = [self.request_json, {"error": "모든 재시도 후 요청 시간 초과"}, self.metadata]
                     if save_filepath:
                         append_to_jsonl(error_data, save_filepath)
                     status_tracker.num_tasks_in_progress -= 1
                     status_tracker.num_tasks_failed += 1
                     return error_data
-                # logger.warning(f"Request #{self.task_id} timeout error")
-                # raise TimeoutError("Request timed out")
+            except ValueError as e:
+                # 응답 처리 오류 처리
+                logger.error(f"요청 #{self.task_id} 응답 처리 오류: {str(e)}")
+                if self.attempts_left > 0:
+                    self.attempts_left -= 1
+                    await retry_queue.put(self)
+                    logger.info(f"요청 #{self.task_id} 재시도 큐에 추가됨 (남은 시도: {self.attempts_left}, 응답 처리 오류)")
+                    return None
+                else:
+                    error = e
             except Exception as e:
-                logger.error(f"Request #{self.task_id} unexpected error during HTTP request: {str(e)}")
+                logger.error(f"요청 #{self.task_id} HTTP 요청 중 예상치 못한 오류: {str(e)}")
                 if progress_tracker:
                     elapsed = time.time() - start_time
                     progress_tracker.update_task_progress(self.task_id, "failed", elapsed=elapsed, error=str(e))
                 raise
 
-            # Process API response
+            # API 응답 처리
             if "error" in response_json:
-                logger.warning(f"Request #{self.task_id} failed with API error: {response_json['error']}")
+                logger.warning(f"요청 #{self.task_id} API 오류 발생: {response_json['error']}")
                 status_tracker.num_api_errors += 1
                 error = response_json
 
-                # Check for rate limit errors
+                # 속도 제한 오류 확인
                 error_message = response_json["error"].get("message", "")
                 if "Rate limit" in error_message or "rate_limit" in error_message.lower():
                     status_tracker.time_of_last_rate_limit_error = time.time()
                     status_tracker.num_rate_limit_errors += 1
                     status_tracker.num_api_errors -= 1
-                    logger.warning(f"Rate limit error for request #{self.task_id}: {error_message}")
-                    raise ConnectionError(f"Rate limit error: {error_message}")
+                    logger.warning(f"요청 #{self.task_id}에 대한 속도 제한 오류: {error_message}")
+                    raise ConnectionError(f"속도 제한 오류: {error_message}")
             else:
-                # logger.info(f"Response #{self.task_id}: OK")
+                # 성공한 응답
                 result_data = [self.request_json, response_json, self.metadata] if self.metadata else [
                     self.request_json, response_json]
 
-        except (ConnectionError, TimeoutError) as e:
-            logger.warning(f"Request #{self.task_id} failed with error: {str(e)}")
+        except (ConnectionError, TimeoutError, ValueError) as e:
+            logger.warning(f"요청 #{self.task_id} 오류 발생: {str(e)}")
             status_tracker.num_other_errors += 1
             error = e
 
-            # Store the error in the result list
+            # 오류 내용을 결과 리스트에 저장
             self.result.append(str(e))
 
-            # If we have attempts left, return None to signal retry is needed
+            # 재시도 가능 여부 확인
             if self.attempts_left > 0:
                 return None
 
         except Exception as e:
-            logger.error(f"Request #{self.task_id} failed with unexpected exception: {str(e)}")
+            logger.error(f"요청 #{self.task_id} 예상치 못한 예외 발생: {str(e)}")
             status_tracker.num_other_errors += 1
             error = e
             self.result.append(str(e))
 
-        # Handle errors and prepare result
+        # 오류 처리 및 결과 준비
         if error:
             if self.attempts_left > 0:
-                # Return None to signal caller that retry is needed
+                # 재시도 신호를 반환
                 return None
             else:
-                # No more retries, create error result
-                logger.error(f"Request #{self.task_id} failed after all attempts. Final error: {error}")
+                # 더 이상 재시도 불가, 오류 결과 생성
+                logger.error(f"요청 #{self.task_id} 모든 시도 후 실패. 최종 오류: {error}")
                 data = (
                     [self.request_json, {"error": [str(e) for e in self.result]}, self.metadata]
                     if self.metadata
@@ -778,25 +802,182 @@ class APIRequest:
                 )
                 result_data = data
 
-                # Save to file if needed
+                # 파일에 저장 (필요한 경우)
                 if save_filepath is not None:
                     append_to_jsonl(data, save_filepath)
 
-                # Update status
+                # 상태 업데이트
                 status_tracker.num_tasks_in_progress -= 1
                 status_tracker.num_tasks_failed += 1
         else:
-            # Successful result
+            # 성공한 결과
             data = result_data
             if save_filepath is not None:
                 append_to_jsonl(data, save_filepath)
-                logger.debug(f"Request #{self.task_id} saved to {save_filepath}")
+                logger.debug(f"요청 #{self.task_id} 결과가 {save_filepath}에 저장됨")
 
-            # Update status
+            # 상태 업데이트
             status_tracker.num_tasks_in_progress -= 1
             status_tracker.num_tasks_succeeded += 1
 
-        return result_data
+        # 처리된 결과가 있으면 그것을 반환, 없으면 원본 결과 반환
+        return processed_result if processed_result is not None else result_data
+
+    # async def call_api(
+    #         self,
+    #         session: aiohttp.ClientSession,
+    #         request_url: str,
+    #         request_header: dict,
+    #         retry_queue: asyncio.Queue,
+    #         status_tracker: StatusTracker,
+    #         save_filepath: str = None,
+    #         timeout: int = 60,
+    #         progress_tracker: ProgressTracker = None,  # 추가: 진행률 추적기
+    # ):
+    #     """Calls the API and handles various error conditions."""
+    #     logger = logging.getLogger(__name__)
+    #     # logger.info(f"Starting request #{self.task_id}")
+    #
+    #     # 요청 시작 시 상태 업데이트
+    #     if progress_tracker:
+    #         progress_tracker.update_task_progress(self.task_id, "start")
+    #
+    #     start_time = time.time()
+    #
+    #     error = None
+    #     result_data = None
+    #
+    #     try:
+    #         # Make the API call
+    #         try:
+    #             async with session.post(
+    #                     url=request_url,
+    #                     headers=request_header,
+    #                     json=self.request_json,
+    #                     timeout=timeout,
+    #                     raise_for_status=False  # Changed to handle status codes explicitly
+    #             ) as http_response:
+    #                 # Check for HTTP error status codes
+    #                 if http_response.status >= 400:
+    #                     error_text = await http_response.text()
+    #                     raise aiohttp.ClientResponseError(
+    #                         request_info=http_response.request_info,
+    #                         history=http_response.history,
+    #                         status=http_response.status,
+    #                         message=f"HTTP error {http_response.status}: {error_text}",
+    #                         headers=http_response.headers
+    #                     )
+    #
+    #                 response_json = await http_response.json()
+    #
+    #                 # 성공 시 상태 업데이트
+    #                 if progress_tracker:
+    #                     elapsed = time.time() - start_time
+    #                     progress_tracker.update_task_progress(self.task_id, "success", elapsed=elapsed)
+    #
+    #         except aiohttp.ClientConnectionError as e:
+    #             logger.warning(f"Request #{self.task_id} connection error: {str(e)}")
+    #             raise ConnectionError(f"Server connection error: {str(e)}")
+    #         except aiohttp.ClientResponseError as e:
+    #             logger.warning(f"Request #{self.task_id} HTTP error: {e.status} - {e.message}")
+    #             raise ConnectionError(f"HTTP error {e.status}: {e.message}")
+    #         except asyncio.TimeoutError:
+    #             logger.warning(f"Request #{self.task_id} timeout error")
+    #             # 타임아웃 발생 시 명확한 처리
+    #             if self.attempts_left > 0:
+    #                 self.attempts_left -= 1
+    #                 # 직접 재시도 큐에 추가
+    #                 await retry_queue.put(self)
+    #                 logger.info(f"Request #{self.task_id} queued for retry ({self.attempts_left} attempts left)")
+    #                 return None
+    #             else:
+    #                 # 재시도 횟수 소진
+    #                 error_data = [self.request_json, {"error": "Request timed out after all retries"}, self.metadata]
+    #                 if save_filepath:
+    #                     append_to_jsonl(error_data, save_filepath)
+    #                 status_tracker.num_tasks_in_progress -= 1
+    #                 status_tracker.num_tasks_failed += 1
+    #                 return error_data
+    #             # logger.warning(f"Request #{self.task_id} timeout error")
+    #             # raise TimeoutError("Request timed out")
+    #         except Exception as e:
+    #             logger.error(f"Request #{self.task_id} unexpected error during HTTP request: {str(e)}")
+    #             if progress_tracker:
+    #                 elapsed = time.time() - start_time
+    #                 progress_tracker.update_task_progress(self.task_id, "failed", elapsed=elapsed, error=str(e))
+    #             raise
+    #
+    #         # Process API response
+    #         if "error" in response_json:
+    #             logger.warning(f"Request #{self.task_id} failed with API error: {response_json['error']}")
+    #             status_tracker.num_api_errors += 1
+    #             error = response_json
+    #
+    #             # Check for rate limit errors
+    #             error_message = response_json["error"].get("message", "")
+    #             if "Rate limit" in error_message or "rate_limit" in error_message.lower():
+    #                 status_tracker.time_of_last_rate_limit_error = time.time()
+    #                 status_tracker.num_rate_limit_errors += 1
+    #                 status_tracker.num_api_errors -= 1
+    #                 logger.warning(f"Rate limit error for request #{self.task_id}: {error_message}")
+    #                 raise ConnectionError(f"Rate limit error: {error_message}")
+    #         else:
+    #             # logger.info(f"Response #{self.task_id}: OK")
+    #             result_data = [self.request_json, response_json, self.metadata] if self.metadata else [
+    #                 self.request_json, response_json]
+    #
+    #     except (ConnectionError, TimeoutError) as e:
+    #         logger.warning(f"Request #{self.task_id} failed with error: {str(e)}")
+    #         status_tracker.num_other_errors += 1
+    #         error = e
+    #
+    #         # Store the error in the result list
+    #         self.result.append(str(e))
+    #
+    #         # If we have attempts left, return None to signal retry is needed
+    #         if self.attempts_left > 0:
+    #             return None
+    #
+    #     except Exception as e:
+    #         logger.error(f"Request #{self.task_id} failed with unexpected exception: {str(e)}")
+    #         status_tracker.num_other_errors += 1
+    #         error = e
+    #         self.result.append(str(e))
+    #
+    #     # Handle errors and prepare result
+    #     if error:
+    #         if self.attempts_left > 0:
+    #             # Return None to signal caller that retry is needed
+    #             return None
+    #         else:
+    #             # No more retries, create error result
+    #             logger.error(f"Request #{self.task_id} failed after all attempts. Final error: {error}")
+    #             data = (
+    #                 [self.request_json, {"error": [str(e) for e in self.result]}, self.metadata]
+    #                 if self.metadata
+    #                 else [self.request_json, {"error": [str(e) for e in self.result]}]
+    #             )
+    #             result_data = data
+    #
+    #             # Save to file if needed
+    #             if save_filepath is not None:
+    #                 append_to_jsonl(data, save_filepath)
+    #
+    #             # Update status
+    #             status_tracker.num_tasks_in_progress -= 1
+    #             status_tracker.num_tasks_failed += 1
+    #     else:
+    #         # Successful result
+    #         data = result_data
+    #         if save_filepath is not None:
+    #             append_to_jsonl(data, save_filepath)
+    #             logger.debug(f"Request #{self.task_id} saved to {save_filepath}")
+    #
+    #         # Update status
+    #         status_tracker.num_tasks_in_progress -= 1
+    #         status_tracker.num_tasks_succeeded += 1
+    #
+    #     return result_data
 
 
 def api_endpoint_from_url(request_url: str) -> str:
@@ -831,7 +1012,7 @@ def api_endpoint_from_url(request_url: str) -> str:
 
     # 3) 로컬 혹은 사설 IP 형태
     #    예: http://localhost:11434/api/generate
-    #         http://172.16.15.112:11434/api/chat
+    #         http://172.16.15.109:11434/api/chat
     #         http://127.0.0.1:11434/api/generate
     match = re.search(r"^http://[^/]+:\d+/api/(.+)$", request_url)
     if match:
@@ -1527,7 +1708,7 @@ def task_id_generator_function():
 #     return dataset
 #
 #
-# async def llm_invoke_batch_langchain(model_name, prompts, template, model_url="http://172.16.15.112:11434",
+# async def llm_invoke_batch_langchain(model_name, prompts, template, model_url="http://172.16.15.109:11434",
 #                                      batch_size=10, max_retries=3, max_concurrent=10):
 #     """프롬프트 배치에 대한 병렬 LLM 호출 (LangChain 사용, 진행률 로깅 기능 추가)"""
 #     logging.info(f"LangChain 사용하여 {len(prompts)}개 프롬프트 처리 시작 (모델: {model_name}, 배치크기: {batch_size})")

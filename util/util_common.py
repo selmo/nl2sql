@@ -161,3 +161,38 @@ def change_jsonl_to_csv(input_file, output_file='', prompt_column="prompt", resp
     if not output_file == '':
         dfs.to_csv(output_file, index=False)
     return dfs
+
+
+def sanitize_filename(filename):
+    """
+    Windows 및 기타 OS에서 사용 불가능한 문자를 제거하거나 대체하여 안전한 파일명 생성
+
+    Args:
+        filename: 변환할 파일명 문자열
+
+    Returns:
+        안전한 파일명 문자열
+    """
+    # Windows에서 허용되지 않는 문자
+    invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
+
+    # 각 문자를 대체
+    safe_name = filename
+    for char in invalid_chars:
+        if char == ':':
+            safe_name = safe_name.replace(char, '-')  # 콜론은 하이픈으로 대체
+        else:
+            safe_name = safe_name.replace(char, '_')  # 다른 특수문자는 언더스코어로 대체
+
+    # 파일명 끝의 공백과 마침표 제거 (Windows에서 문제 발생 가능)
+    safe_name = safe_name.rstrip('. ')
+
+    # 파일명이 비어있거나 Windows 예약어인 경우 대체
+    if not safe_name or safe_name.upper() in [
+        'CON', 'PRN', 'AUX', 'NUL',
+        'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+        'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
+    ]:
+        safe_name = f"_{safe_name}"
+
+    return safe_name
