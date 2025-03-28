@@ -1,3 +1,4 @@
+import json
 import re
 import logging
 import pandas as pd
@@ -26,16 +27,18 @@ def extract_sql_queries(text: str) -> str:
     return ""
 
 
-def clean_response(response, parser=None):
+def clean_response(response, only_sql: bool = True):
     clean_output = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
-    if parser is None:
+    logging.debug('response: %s', response)
+    logging.debug('clean_output: %s', clean_output)
+    if only_sql:
         # logging.info("cleaned_output 1: [%s] %s", type(clean_output), clean_output)
-
-        return clean_output
+        clean_output = json.loads(clean_output)
+        return clean_output['gen_sql']
     else:
         # logging.info("cleaned_output 2: [%s] %s", type(clean_output), clean_output)
         try:
-            result = parser.parse(clean_output)
+            result = sql_parser.parse(clean_output)
             # logging.info("result 0: [%s] %s\n", type(result), result)
             return result
         except TypeError as te:
@@ -55,29 +58,15 @@ def clean_response(response, parser=None):
             )
             logging.error("error msg: %s\n", e)
             return sql_obj
-# result:
-# {'model': 'sqlcoder:15b',
-#  'created_at': '2025-03-21T01:35:28.250463879Z',
-#  'response': '{
-#       "reasoning": "...",
-#       "description": "...",
-#       "gen_sql": "SELECT * FROM quests WHERE name LIKE \'%사냥-고블린%\' OR name LIKE \'%수집-꽃%\';"
-#       }',
-#   'done': True,
-#   'done_reason': 'stop',
-#   'context': [...],
-#   'total_duration': 20305647401,
-#   'load_duration': 26541045,
-#   'prompt_eval_count': 309,
-#   'prompt_eval_duration': 165000000,
-#   'eval_count': 241,
-#   'eval_duration': 6011000000,
-#   'task_id': 8}
+
+
 def is_valid_content(result: dict) -> bool:
     return bool(result) and 'message' in result and 'content' in result['message']
 
+
 def is_valid_response(result: dict) -> bool:
     return bool(result) and 'response' in result and 'gen_sql' in result['response']
+
 
 def has_error(result: dict) -> bool:
     return bool(result) and 'error' in result
@@ -87,7 +76,8 @@ def make_result(
         responses: List[dict],
         dataset: pd.DataFrame,
         success_count: int = 0,
-        error_count: int = 0
+        error_count: int = 0,
+        only_sql: bool = True,
 ) -> Tuple[pd.DataFrame, int, int]:
     """
     responses 리스트를 순회하며 dataset에 'gen_sql' 값을 업데이트한다.
@@ -121,17 +111,21 @@ def make_result(
             if is_valid_content(result):
                 content = result['message']['content']
                 logging.debug("Content: %s", content)
-                # clean_response는 예시로 둡니다. 실제 로직은 필요에 맞춰 구현
-                cleaned_result = clean_response(content, sql_parser)
-                gen_sql_list.append(cleaned_result.gen_sql)
+                cleaned_result = clean_response(content, only_sql)
+                if only_sql:
+                    gen_sql_list.append(cleaned_result)
+                else:
+                    gen_sql_list.append(cleaned_result.gen_sql)
                 success_count += 1
 
             elif is_valid_response(result):
                 content = result['response']
                 logging.debug("Content: %s", content)
-                # clean_response는 예시로 둡니다. 실제 로직은 필요에 맞춰 구현
-                cleaned_result = clean_response(content, sql_parser)
-                gen_sql_list.append(cleaned_result.gen_sql)
+                cleaned_result = clean_response(content, only_sql)
+                if only_sql:
+                    gen_sql_list.append(cleaned_result)
+                else:
+                    gen_sql_list.append(cleaned_result.gen_sql)
                 success_count += 1
 
             elif has_error(result):

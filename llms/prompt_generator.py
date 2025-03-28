@@ -1,25 +1,76 @@
+from datasets.packaged_modules.pandas import pandas
 from langchain_core.output_parsers import PydanticOutputParser
 from pandas import DataFrame
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
-template = """\
+from util.util_common import is_gpt_model
+
+template_1 = """\
 You are a helpful language model. Please follow these rules:
 1. Output must be valid JSON, matching the schema below exactly (no extra text outside the JSON).
 2. Put your chain-of-thought or reasoning in the "reasoning" field. 
 3. Provide a short high-level description in the "description" field.
-4. Provide the final SQL in the "sql" field.
+4. Provide the final SQL in the "gen_sql" field.
 
 {format_instructions}
 
-The user request is: "{request}"
+The user request is: "{question}"
 The database schema is:
-{ddl}
+{schema}
+
+Now provide your answer strictly in the JSON format (no extra text!):
+SQL to resolve the question:
+"""
+
+template = """\
+You are a helpful language model. Please follow these rules:
+- Output must be valid JSON, matching the schema below exactly (no extra text outside the JSON).
+- Provide the final SQL in the "gen_sql" field.
+
+{format_instructions}
+
+The user request is: "{question}"
+The database schema is:
+{schema}
 
 Now provide your answer strictly in the JSON format (no extra text!):
 SQL to resolve the question:
 """
 # SQL to resolve the question: "{sql}"
 
+
+# def make_requests_for_generation(df):
+#     prompts = []
+#     format_instructions = '''The output should be formatted as a JSON instance that conforms to the JSON schema below.
+#
+# As an example, for the schema {"properties": {"foo": {"title": "Foo", "description": "a list of strings", "type": "array", "items": {"type": "string"}}}, "required": ["foo"]}
+# the object {"foo": ["bar", "baz"]} is a well-formatted instance of the schema. The object {"properties": {"foo": ["bar", "baz"]}} is not well-formatted.
+#
+# Here is the output schema:
+# ```
+# {"properties": {"reasoning": {"description": "your chain-of-thought or reasoning", "title": "Reasoning", "type": "string"}, "description": {"description": "a short high-level description", "title": "Description", "type": "string"}, "gen_sql": {"description": "the final SQL", "title": "Gen Sql", "type": "string"}}, "required": ["reasoning", "description", "gen_sql"]}
+# ```'''
+#     for idx, row in df.iterrows():
+#         prompts.append(
+#             """\
+#         You are a helpful language model. Please follow these rules:
+#         1. Output must be valid JSON, matching the schema below exactly (no extra text outside the JSON).
+#         2. Put your chain-of-thought or reasoning in the "reasoning" field.
+#         3. Provide a short high-level description in the "description" field.
+#         4. Provide the final SQL in the "sql" field.
+# """ + f"""
+# {format_instructions}
+#
+#         The user request is: "{row['question']}"
+#         The database schema is:
+#         {row['context']}
+#
+#         Now provide your answer strictly in the JSON format (no extra text!):
+#         SQL to resolve the question:
+#         """
+#         )
+#
+#     return prompts
 
 
 # template = """
@@ -91,8 +142,7 @@ SQL to resolve the question:
 # Based on your instructions, here is the SQL query I have generated to answer the question `{question}`:
 # ```sql
 # """
-sqlcoder_template = """ 
-### Instructions:
+sqlcoder_template = """### Instructions:
 Your task is to convert a question into a SQL query, given a database schema.
 Adhere to these rules:
 - **Deliberately go through the question and database schema word by word** to appropriately answer the question
@@ -109,40 +159,96 @@ Based on your instructions, here is the SQL query I have generated to answer the
 ```sql
 """
 
+sqlcoder_template_2 = """### Task
+Generate a SQL query to answer [QUESTION]{request}[/QUESTION]
+
+### Database Schema
+The query will run on a database with the following schema:
+{schema}
+
+### Answer
+Given the database schema, here is the SQL query that [QUESTION]{question}[/QUESTION]
+[SQL]
+{sql}"""
+
+k2sql_template = """당신은 SQL을 생성하는 SQL 봇입니다. DDL과 요청사항을 바탕으로 적절한 SQL 쿼리를 생성하세요.
+
+DDL:
+{ddl}
+
+요청사항:
+{question}
+
+SQL:
+{sql}"""
+
+
+# evaluation_template = """Based on below DDL and Question, evaluate gen_sql can resolve Question.
+# If gen_sql and gt_sql do equal job, return "yes" else return "no". Output JSON Format: {"resolve_yn": ""}""
+#
+# DDL: {schema}
+# Question: {question}
+# gt_sql: {answer}
+# gen_sql: {gen_sql}"""
+evaluation_template = """Based on below DDL and Question, evaluate if gen_sql correctly resolves the Question.
+If gen_sql and gt_sql produce the same results (functionally equivalent), return "yes" else return "no". 
+Note that SQL queries might have different syntax but still return the same results.
+Output JSON Format: {{"resolve_yn": ""}}
+
+DDL: {schema}
+Question: {question}
+gt_sql (ground truth): {gt_sql}
+gen_sql (generated): {gen_sql}"""
+
 class SQL(BaseModel):
     reasoning: str = Field(description="your chain-of-thought or reasoning")
     description: str = Field(description="a short high-level description")
     gen_sql: str = Field(description="the final SQL")
 
+
 sql_parser = PydanticOutputParser(pydantic_object=SQL)
 
 
-def make_prompt(model_id: str, schema:str, question:str):
-    if model_id.lower().startswith('sqlcoder'):
-        return sqlcoder_template.format(schema=schema, question=question)
+def make_prompt(model: str, data, evaluation: bool = False, only_sql: bool =True):
+    if evaluation:
+        return evaluation_template.format(schema=data['context'],
+                                          question=data['question'],
+                                          gt_sql=data['answer'],
+                                          gen_sql=data['gen_sql'])
+    if model.lower().startswith('sqlcoder'):
+        return sqlcoder_template.format(schema=data['context'], question=data['question'])
     else:
-        return template.format(ddl=schema, request=question, format_instructions=sql_parser.get_format_instructions())
+        return template.format(schema=data['context'],
+                               question=data['question'],
+                               format_instructions='' if only_sql else sql_parser.get_format_instructions())
 
 
-def make_prompts_for_evaluation(df):
+def make_prompts(dataset: DataFrame, model: str, evaluation: bool = False, only_sql: bool =True):
     prompts = []
-    for idx, row in df.iterrows():
-        prompts.append(
-            """Based on below DDL and Question, evaluate gen_sql can resolve Question. 
-If gen_sql and gt_sql do equal job, return "yes" else return "no". Output JSON Format: {"resolve_yn": ""}""" +
-            f"""
-
-DDL: {row['context']}
-Question: {row['question']}
-gt_sql: {row['answer']}
-gen_sql: {row['gen_sql']}"""
-        )
+    for _, data in dataset.iterrows():
+        prompts.append(make_prompt(model, data, evaluation, only_sql))
 
     return prompts
 
-def make_request(model_id, prompt: str, gpt_model: bool = False, evaluation: bool = False):
-    if gpt_model:
-        return {"model": model_id,
+# def make_prompts_for_evaluation(df):
+#     prompts = []
+#     for idx, row in df.iterrows():
+#         prompts.append(
+#             """Based on below DDL and Question, evaluate gen_sql can resolve Question.
+# If gen_sql and gt_sql do equal job, return "yes" else return "no". Output JSON Format: {"resolve_yn": ""}""" +
+#             f"""
+#
+# DDL: {row['context']}
+# Question: {row['question']}
+# gt_sql: {row['answer']}
+# gen_sql: {row['gen_sql']}"""
+#         )
+#
+#     return prompts
+
+def make_request(model: str, prompt: str, evaluation: bool = False, only_sql: bool = False):
+    if is_gpt_model(model):
+        return {"model": model,
                 "response_format": {
                     "type": "json_object"
                 },
@@ -165,14 +271,19 @@ def make_request(model_id, prompt: str, gpt_model: bool = False, evaluation: boo
                     },
                     "required": ["reasoning", "description", "gen_sql"]
                    }
-    return {"model": model_id,
+    only_sql_format = {"type": "object",
+                    "properties": {
+                        "gen_sql": {"type": "string"}
+                    },
+                    "required": ["gen_sql"]
+                   }
+    return {"model": model,
             "stream": False,
             "prompt": prompt,
-            "format": eval_format if evaluation else trans_format}
+            "format": eval_format if evaluation else (only_sql_format if only_sql else trans_format)}
 
 
-def make_request_jobs(model: str, dataset: DataFrame, evaluation=False):
-    prompts = make_prompts_for_evaluation(dataset)
-    gpt_model = True if model.lower().startswith('gpt') or model.lower().startswith('o1') or model.lower().startswith('o3') else False
+def make_request_jobs(model: str, dataset: DataFrame, evaluation: bool = False):
+    prompts = make_prompts(dataset, model, evaluation=evaluation, only_sql=True)
 
-    return [make_request(model, prompt, gpt_model=gpt_model, evaluation=evaluation) for prompt in prompts]
+    return [make_request(model, prompt, evaluation=evaluation, only_sql=True) for prompt in prompts]

@@ -40,10 +40,14 @@ async def llm_invoke_single(session, data, model_url, model_name, task_id, progr
     progress_tracker.update_task_progress(task_id, "start")
     start_time = time.time()
 
-    prompt = make_prompt(model_name, data['context'], data['question'])
-    request = make_request(model_name, prompt)
-    logging.debug("Request: %s", request)
+    # prompt = make_prompt(model_name, data['context'], data['question'])
+    # request = make_request(model_name, prompt)
+    # logging.info("data: [%s] %s", type(data), data['context'])
 
+    prompt = make_prompt(model_name, data, evaluation=False)
+    request = make_request(model_name, prompt, only_sql=True)
+
+    logging.debug("llm_invoke_single: url=%s, request=%s", model_url, request)
     try:
         async with session.post(model_url, json=request) as response:
             if response.status != 200:
@@ -80,7 +84,7 @@ async def llm_invoke_batch(datasets, model_name, model_url="http://localhost:114
 
     # 커넥션 풀 설정으로 TCP 연결 재사용
     conn = aiohttp.TCPConnector(limit=max_concurrent)
-    timeout = aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=60)
+    timeout = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=300)
 
     async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
         for batch_idx in range(0, total_prompts, batch_size):
@@ -109,7 +113,7 @@ async def llm_invoke_batch(datasets, model_name, model_url="http://localhost:114
 
             for result in batch_results:
                 if isinstance(result, Exception):
-                    logging.error(f"작업 예외 발생: {str(result)}")
+                    logging.error(f"작업 예외 발생 1: {str(result)}")
                     continue
 
                 task_id = result.get("task_id")
@@ -134,7 +138,7 @@ async def llm_invoke_batch(datasets, model_name, model_url="http://localhost:114
 
             # 서버 부하 방지를 위한 짧은 대기
             if batch_end < total_prompts:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1.0)
 
     # 진행률 표시 종료
     progress_tracker.close()
@@ -188,7 +192,7 @@ async def llm_invoke_jobs_batch(model_name, jobs, model_url="http://172.16.15.11
 
             for result in batch_results:
                 if isinstance(result, Exception):
-                    logging.error(f"작업 예외 발생: {str(result)}")
+                    logging.error(f"작업 예외 발생 2: {str(result)}")
                     continue
 
                 task_id = result.get("task_id")

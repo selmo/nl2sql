@@ -2,41 +2,63 @@ import time
 import logging
 import sys
 import os.path as path
-import data_loader
-import config
 import evaluator
-from aux_common import prepare_train_dataset, merge_model
-from aux_local import prepare_test_dataset_origin
-from timing_stats import timing_stats_manager, log_timing_stats
-from util_common import check_and_create_directory, autotrain
+from evaluator import prepare_finetuning, merge_model
+from util import config
+from util.timing_stats import timing_stats_manager, log_timing_stats
+from util.util_common import check_and_create_directory, autotrain
+
+
+def setup_root_logger():
+    # 콘솔 핸들러 설정 (INFO 이상만 콘솔로 출력)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(logging.Formatter(
+        '%(asctime)s [%(name)s][%(levelname)s] %(message)s'
+    ))
+
+    # 루트 로거에 콘솔 핸들러만 등록
+    root_logger = logging.getLogger()
+    # 기존 핸들러 제거
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    root_logger.setLevel(logging.DEBUG)  # 모든 레벨 처리
+    root_logger.addHandler(console_handler)
+
+
+# 함수별 파일 핸들러 추가 함수
+def add_file_handler(log_filepath, level=logging.DEBUG):
+    file_handler = logging.FileHandler(log_filepath)
+    file_handler.setLevel(level)
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s [%(name)s][%(levelname)s] %(message)s'
+    ))
+
+    root_logger = logging.getLogger()
+    root_logger.addHandler(file_handler)
+    return file_handler
+
 
 if __name__ == "__main__":
     args = config.parse_arguments()
     program_start_time = time.time()
     timing_stats_manager.start_process("main")
 
+    check_and_create_directory(args.prefix)
+
+    # 루트 로거 초기 설정
+    setup_root_logger()
+    add_file_handler(path.join(args.prefix, "nl2sql.log"))
     command_start_time = time.time()
     timing_stats_manager.start_process(f"command_{args.command}", "main")
 
-    # 콘솔 핸들러 설정 (INFO 이상만 콘솔로 출력)
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)  # INFO부터 상위 레벨까지 출력
-    console_handler.setFormatter(logging.Formatter(
-        '%(asctime)s [%(name)s][%(levelname)s] %(message)s'
-    ))
-
-    # 루트 로거에 두 핸들러 등록
-    root_logger = logging.getLogger()
-    # 가장 낮은 레벨로 잡아야 DEBUG 메시지가 파일 핸들러까지 전달됨
-    root_logger.setLevel(logging.DEBUG)
-    root_logger.addHandler(console_handler)
 
     if args.command == 'train':
         datapath = path.join(args.prefix, 'data')
         check_and_create_directory(datapath)
 
         timing_stats_manager.start_process("prepare_train_dataset", f"command_{args.command}")
-        prepare_train_dataset(args.prefix)
+        prepare_finetuning(args)
         timing_stats_manager.stop_process("prepare_train_dataset")
 
         # 모델 학습 시간 측정
@@ -72,14 +94,14 @@ if __name__ == "__main__":
     elif args.command == 'test' or args.command == 'eval':
         # 테스트 데이터셋 준비 시간 측정
         timing_stats_manager.start_process("prepare_test_dataset", f"command_{args.command}")
-        test_dataset = prepare_test_dataset_origin(args.base_model, args.prefix, args.test_size)
+        test_dataset = evaluator.prepare_evaluation_hf(args.base_model, args.prefix, args.test_size)
         prepare_time = timing_stats_manager.stop_process("prepare_test_dataset")
         logging.info(f"테스트 데이터셋 준비 완료: {prepare_time:.2f}초 소요")
 
         evaluator.perform_evaluation(args, test_dataset)
 
     elif args.command == 'ollama-api':
-        test_dataset = data_loader.prepare_evaluation(args)
+        test_dataset = evaluator.prepare_evaluation(args)
         evaluator.perform_evaluation(args, test_dataset)
 
     else:
