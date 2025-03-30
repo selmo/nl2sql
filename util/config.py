@@ -15,8 +15,8 @@ def parse_arguments():
     parser = ArgumentParser(description='모델 학습 및 평가 도구')
 
     # 공통 인수
-    parser.add_argument('command', choices=['train', 'merge', 'test', 'eval', 'ollama-api', 'batch'],
-                        help='실행할 명령 (train, merge, test, eval, ollama-api, batch')
+    parser.add_argument('command', choices=['train', 'merge', 'test', 'eval', 'ollama-api', 'batch', 'upload'],
+                        help='실행할 명령 (train, merge, test, eval, ollama-api, batch, upload')
     parser.add_argument('--prefix', type=str, default=".",
                         help='실행 데이터 디렉토리 접두사')
     parser.add_argument('--ollama-url', type=str, default="",
@@ -60,6 +60,8 @@ def parse_arguments():
                         help='출력 데이터 컬럼 이름')
     parser.add_argument('--upload-to-hf', type=str, default=None,
                         help='huggingface로 업로드 (repo-id를 지정)')
+    parser.add_argument('--from-file', type=str, default=None,
+                        help='데이터 업로드')
 
     # # 번역 모드 옵션
     # parser.add_argument('--source-lang', type=str, default='en',

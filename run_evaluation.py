@@ -6,7 +6,6 @@ import os.path as path
 import evaluator
 from evaluator import prepare_finetuning, merge_model
 from util import config
-from util.config import BatchMode
 from util.util_common import check_and_create_directory, autotrain
 
 
@@ -152,8 +151,12 @@ if __name__ == "__main__":
             # 결과 요약
             logging.info(f"배치 처리 완료: {len(results)}개 항목 처리됨")
 
+        elif args.command == 'upload':
+            # 배치 처리 실행
+            evaluator.process_upload(args.from_file, args.upload_to_hf)
+
         else:
-            print('사용 가능한 명령: train, merge, test, eval, ollama-api')
+            print('사용 가능한 명령: train, merge, test, eval, ollama-api, batch, upload')
             sys.exit(1)
     finally:
         # 명령어 실행 종료 및 시간 측정

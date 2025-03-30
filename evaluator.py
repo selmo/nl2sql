@@ -1161,6 +1161,80 @@ def process_batch(options):
     return results_all_splits
 
 
+def process_upload(input_file, hf_dataset_path):
+    """
+    이미 생성된 결과 파일들을 Hugging Face에 업로드하는 간단한 함수
+
+    Args:
+        input_file: 결과 파일이 저장된 파일 경로 (문자열)
+        hf_dataset_path: Hugging Face에 업로드할 데이터셋 경로 (예: 'username/dataset-name')
+
+    Returns:
+        dict: 업로드된 스플릿별 데이터프레임
+    """
+    # 시작 시간 측정
+    start_time = time.time()
+    input_file = Path(input_file)
+
+    # 입력 디렉토리 경로 정규화
+    logging.info(f"입력 파일: {input_file}")
+
+    # 경로가 존재하는지 확인
+    if not Path(input_file).exists():
+        raise ValueError(f"입력 디렉토리가 존재하지 않습니다: {input_file}")
+
+    # 결과 저장 딕셔너리
+    results_all_splits = {}
+
+    try:
+        file_ext = input_file.suffix.lower()
+        # 파일 확장자에 따라 로드 방식 결정
+        if file_ext.lower() == '.jsonl':
+            df = pd.read_json(input_file, lines=True)
+        elif file_ext.lower() == '.csv':
+            df = pd.read_csv(input_file)
+        else:
+            logging.warning(f"지원되지 않는 파일 형식: {file_ext}")
+            raise
+
+        # 결과 딕셔너리에 추가
+        results_all_splits['test'] = df
+
+    except Exception as e:
+        logging.error(f"파일 '{input_file}' 로드 중 오류 발생: {str(e)}")
+        results_all_splits['test'] = None
+
+    # 업로드할 데이터가 있는지 확인
+    if not results_all_splits:
+        raise ValueError("업로드할 데이터가 없습니다")
+
+    # Hugging Face에 업로드
+    try:
+        logging.info(f"Hugging Face에 스플릿 데이터셋 업로드 시작: {hf_dataset_path}")
+
+        # 업로드 함수 호출
+        upload_to_huggingface(
+            results_all_splits,  # 스플릿별 데이터프레임 딕셔너리
+            hf_dataset_path,  # 업로드할 데이터셋 경로
+            get_hf_token()  # Hugging Face API 토큰
+        )
+
+        logging.info(f"Hugging Face 업로드 완료: {hf_dataset_path}")
+    except Exception as e:
+        logging.error(f"Hugging Face 업로드 중 오류 발생: {str(e)}")
+        raise
+
+    # 실행 시간 계산
+    execution_time = time.time() - start_time
+
+    # 요약 정보 출력
+    logging.info(f"\n===== 업로드 처리 요약 =====")
+    logging.info(f"입력 파일: {input_file}")
+    logging.info(f"업로드 대상: {hf_dataset_path}")
+    logging.info(f"총 실행 시간: {execution_time:.2f}초")
+    logging.info("============================\n")
+
+
 # def process_batch(options):
 #     """
 #     명령행 옵션에 따라 배치 처리 수행
