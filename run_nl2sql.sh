@@ -4,7 +4,7 @@
 
 # 기본 설정
 OLLAMA_URL="172.16.15.112"
-PREFIX="$(date +%Y%m%d)"
+PREFIX="output"
 BATCH_SIZE=50
 MAX_CONCURRENT=20
 MAX_RETRIES=10
