@@ -6,6 +6,7 @@ import os.path as path
 import evaluator
 from evaluator import prepare_finetuning, merge_model
 from util import config
+from util.config import BatchMode
 from util.util_common import check_and_create_directory, autotrain
 
 
@@ -56,7 +57,7 @@ def add_file_handler(log_filepath, level=logging.DEBUG):
 
     # 로그 디렉토리 생성
     log_dir = path.dirname(log_filepath)
-    os.makedirs(log_dir, exist_ok=True)
+    check_and_create_directory(log_dir)
 
     # 파일 핸들러 생성
     file_handler = logging.FileHandler(log_filepath)
@@ -91,11 +92,15 @@ if __name__ == "__main__":
 
     # 루트 로거 초기 설정
     setup_root_logger()
+
     # 파일 핸들러 추가
     log_handler = add_file_handler(abs_log_path)
 
     # 프로그램 시작 로그
-    logging.info(f"NL2SQL 평가 프로그램 시작 (명령: {args.command}, 로그 파일: {abs_log_path})")
+    if args.command == 'batch':
+        logging.info(f"배치 처리 프로그램 시작 (모드: {args.mode}, 로그 파일: {abs_log_path})")
+    else:
+        logging.info(f"NL2SQL 평가 프로그램 시작 (명령: {args.command}, 로그 파일: {abs_log_path})")
 
     command_start_time = time.time()
 
@@ -138,6 +143,14 @@ if __name__ == "__main__":
         elif args.command == 'ollama-api':
             test_dataset = evaluator.prepare_evaluation(args)
             evaluator.perform_evaluation(args, test_dataset)
+
+
+        elif args.command == 'batch':
+            # 배치 처리 실행
+            results = evaluator.process_batch(args)
+
+            # 결과 요약
+            logging.info(f"배치 처리 완료: {len(results)}개 항목 처리됨")
 
         else:
             print('사용 가능한 명령: train, merge, test, eval, ollama-api')

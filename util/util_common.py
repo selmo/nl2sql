@@ -5,6 +5,130 @@ import re
 from os.path import join
 from pathlib import Path
 
+from huggingface_hub import login
+from pandas import DataFrame
+
+def load_dataset(options) -> DataFrame:
+    """
+    옵션에 따라 데이터셋 로드
+
+    데이터셋 지정 형식:
+    1. 이름만 사용: "origin", "spider" 등
+    2. 전체 경로 지정: "경로:설정:분할" (예: "shangrilar/ko_text2sql:origin:test")
+
+    Args:
+        options: 명령행 옵션
+
+    Returns:
+        DataFrame: 로드된 데이터셋
+    """
+    from datasets import load_dataset
+
+    # 기본 데이터셋 설정
+    dataset_path = "shangrilar/ko_text2sql"
+    dataset_name = "clean"
+    dataset_split = "train"
+
+    # 테스트 데이터셋 설정 가져오기
+    dataset_option = getattr(options, 'test_dataset', None)
+
+    if dataset_option:
+        parts = dataset_option.split(':')
+        dataset_path = parts[0]
+        dataset_name = parts[1] if len(parts) > 1 else None
+        dataset_split = parts[2] if len(parts) > 2 else "test"
+
+    try:
+        # 데이터셋 로드
+        logging.info(f"데이터셋 로드 중: {dataset_path}, 설정: {dataset_name}, 분할: {dataset_split}")
+        df = load_dataset(dataset_path, dataset_name)[dataset_split]
+        df = df.to_pandas()
+
+        # 테스트 크기 제한 적용
+        if hasattr(options, 'test_size') and options.test_size is not None:
+            try:
+                size = int(options.test_size)
+                df = df[:size]
+                logging.info(f"테스트 크기 제한 적용: {size}개 샘플")
+            except ValueError:
+                # test_size가 정수가 아닌 경우, 데이터셋 경로로 간주
+                logging.info(f"test_size '{options.test_size}'는 숫자가 아닙니다. 데이터셋 경로로 처리합니다.")
+                return load_dataset_from_path(options.test_size)
+
+        logging.info(f"데이터셋 로드 완료: {len(df)}개 데이터")
+        return df
+
+    except Exception as e:
+        logging.error(f"데이터셋 '{dataset_path}:{dataset_name}:{dataset_split}' 로드 중 오류 발생: {str(e)}")
+
+        # 경로 문자열 형식으로 전달된 값인지 확인
+        if hasattr(options, 'test_size') and options.test_size is not None:
+            if not isinstance(options.test_size, (int, float)) and ':' in options.test_size:
+                logging.info(f"test_size 값을 데이터셋 경로로 시도합니다: {options.test_size}")
+                return load_dataset_from_path(options.test_size)
+
+        # 기본 데이터셋으로 대체
+        logging.info("기본 'shangrilar/ko_text2sql:origin:test' 데이터셋으로 대체합니다.")
+        df = load_dataset("shangrilar/ko_text2sql", "origin")["test"]
+        df = df.to_pandas()
+
+        if (hasattr(options, 'test_size') and
+                options.test_size is not None and
+                isinstance(options.test_size, (int, float))):
+            df = df[:int(options.test_size)]
+
+        return df
+
+
+def load_dataset_from_path(dataset_path_str):
+    """
+    문자열 경로에서 데이터셋 로드 (형식: '경로:설정:분할')
+
+    Args:
+        dataset_path_str: 데이터셋 경로 문자열
+
+    Returns:
+        DataFrame: 로드된 데이터셋
+    """
+    from datasets import load_dataset
+    parts = dataset_path_str.split(':')
+    if len(parts) < 2:
+        raise ValueError(f"데이터셋 경로 형식이 잘못되었습니다: {dataset_path_str}. '경로:설정:분할' 형식이어야 합니다.")
+
+    # 기본값 설정
+    path = parts[0]
+    name = parts[1] if len(parts) > 1 else None
+    split = parts[2] if len(parts) > 2 else "test"
+
+    logging.info(f"경로에서 데이터셋 로드 중: {path}, 설정: {name}, 분할: {split}")
+
+    # name이 None이면 name 인자 없이 호출
+    if name:
+        df = load_dataset(path, name)[split]
+    else:
+        df = load_dataset(path)[split]
+
+    return df.to_pandas()
+
+
+# def load_dataset(options):
+#     """
+#     옵션에 따라 데이터셋 로드
+#
+#     Args:
+#         options: 명령행 옵션
+#
+#     Returns:
+#         DataFrame: 로드된 데이터셋
+#     """
+#     if options.mode == BatchMode.NL2SQL.value:
+#         from datasets import load_dataset
+#         df = load_dataset("shangrilar/ko_text2sql", "origin")['test']
+#         df = df.to_pandas()
+#         if options.test_size is not None:
+#             df = df[:options.test_size]
+#         return df
+
 
 def is_gpt_model(model: str):
     return (True
@@ -196,3 +320,67 @@ def sanitize_filename(filename):
         safe_name = f"_{safe_name}"
 
     return safe_name
+
+
+def upload_to_huggingface(data, dataset_name, token, split_name=None):
+    """
+    데이터프레임 또는 DatasetDict을 Hugging Face에 업로드
+
+    Args:
+        data: DataFrame 또는 DatasetDict 객체
+        dataset_name: Hugging Face에 업로드할 데이터셋 이름 (e.g., 'username/dataset-name')
+        token: Hugging Face API 토큰
+        split_name: 단일 DataFrame을 업로드할 때의 스플릿 이름 (기본값: None)
+    """
+    from datasets import Dataset, DatasetDict
+
+    # Hugging Face 로그인
+    login(token)
+
+    # 데이터 유형에 따른 처리
+    if isinstance(data, pd.DataFrame):
+        # 단일 DataFrame인 경우
+        dataset = Dataset.from_pandas(data)
+
+        if split_name:
+            # 스플릿 이름이 지정된 경우 DatasetDict으로 업로드
+            dataset_dict = DatasetDict({split_name: dataset})
+            dataset_dict.push_to_hub(
+                dataset_name,
+                private=False,
+            )
+            logging.info(f"데이터셋이 '{split_name}' 스플릿으로 {dataset_name}에 업로드되었습니다.")
+        else:
+            # 스플릿 이름이 없는 경우 단일 데이터셋으로 업로드
+            dataset.push_to_hub(
+                dataset_name,
+                private=False,
+            )
+            logging.info(f"데이터셋이 성공적으로 {dataset_name}에 업로드되었습니다.")
+
+    elif isinstance(data, dict):
+        # 스플릿별 DataFrame 딕셔너리인 경우
+        dataset_dict = DatasetDict()
+
+        # 각 스플릿 변환
+        for split, df in data.items():
+            if df is not None:
+                dataset_dict[split] = Dataset.from_pandas(df)
+
+        # Hugging Face에 업로드
+        dataset_dict.push_to_hub(
+            dataset_name,
+            private=False,
+        )
+        logging.info(f"데이터셋 딕셔너리가 성공적으로 {dataset_name}에 업로드되었습니다.")
+
+    elif hasattr(data, 'push_to_hub'):
+        # 이미 Dataset 또는 DatasetDict인 경우
+        data.push_to_hub(
+            dataset_name,
+            private=False,
+        )
+        logging.info(f"데이터셋이 성공적으로 {dataset_name}에 업로드되었습니다.")
+
+    else:
+        raise TypeError(f"지원되지 않는 데이터 유형: {type(data)}")
