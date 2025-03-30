@@ -41,6 +41,10 @@ def parse_arguments():
                         help='테스트 데이터셋 이름 (기본값: "shangrilar/ko_text2sql:origin:test")')
     parser.add_argument('--results-file', type=str, default="[PREFIX]/nl2sql_eval_results.csv",
                         help='평가 결과를 저장할 CSV 파일 이름')
+    parser.add_argument('--question-column', type=str, default="question",
+                        help='질문 컬럼명')
+    parser.add_argument('--answer-column', type=str, default="answer",
+                        help='응답 컬럼명')
 
     # 모델 예열 관련 옵션 추가
     parser.add_argument('--warmup-model', action='store_true', default=True,

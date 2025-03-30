@@ -140,6 +140,8 @@ def prepare_evaluation(options):
         # 입력/출력 컬럼 확인
         input_column = options.input_column
         output_column = options.output_column
+        question_column = options.question_column
+        answer_column = options.answer_column
 
         if batch_mode == BatchMode.NL2SQL:
             # NL2SQL 모드는 기본 컬럼 사용
@@ -156,6 +158,8 @@ def prepare_evaluation(options):
             # 'target_lang': options.target_lang,
             'input_column': input_column,
             'output_column': output_column,
+            'question_column': question_column,
+            'answer_column': answer_column,
             'batch_size': options.batch_size,
             'max_retries': options.max_retries,
             'max_concurrent': options.max_concurrent,
@@ -933,9 +937,9 @@ def process_batch(options):
         input_column = input_column or 'question'
         output_column = output_column or 'gen_sql'
     elif batch_mode == BatchMode.TRANSLATION:
-        # 번역 모드는 명시적 컬럼 지정 필요
-        if not input_column or not output_column:
-            raise ValueError("Translation 모드에서는 input_column과 output_column이 필요합니다.")
+        # NL2SQL 모드는 기본 컬럼 사용
+        input_column = input_column or 'question'
+        output_column = output_column or 'response'
 
     # 추가 옵션 설정
     batch_options = {
@@ -1049,23 +1053,44 @@ def process_batch(options):
         parts = dataset_option.split(':')
         dataset_path = parts[0]
         dataset_name = parts[1] if len(parts) > 1 else None
+        dataset_split = parts[2] if len(parts) > 2 else None
     else:
         dataset_path = "shangrilar/ko_text2sql"
         dataset_name = "origin"
+        dataset_split = "test"
 
     # 데이터셋 로드 및 사용 가능한 스플릿 확인
     try:
-        logging.info(f"데이터셋 로드 중: {dataset_path}, 설정: {dataset_name}")
+        logging.info(f"데이터셋 로드 중: {dataset_path}, 설정: {dataset_name}, 스플릿: {dataset_split}")
 
         # 데이터셋 로드
         if dataset_name:
-            dataset = load_dataset(dataset_path, dataset_name)
+            dataset = load_dataset(path=dataset_path, name=dataset_name, split=dataset_split)
         else:
-            dataset = load_dataset(dataset_path)
+            dataset = load_dataset(path=dataset_path)
 
         # 사용 가능한 스플릿 목록
-        available_splits = list(dataset.keys())
-        logging.info(f"사용 가능한 스플릿: {available_splits}")
+        logging.info(f'dataset: [{type(dataset)}]{dataset}')
+
+        import datasets
+        if isinstance(dataset, datasets.arrow_dataset.Dataset):
+            is_dataset = True
+            available_splits = [dataset_split]
+        else:
+            is_dataset = False
+            available_splits = list(dataset.keys())
+            logging.info(f"사용 가능한 스플릿: {available_splits}")
+
+        # if isinstance(dataset, datasets.DatasetDict):
+        #     available_splits = list(dataset.keys())
+        #     logging.info(f"사용 가능한 스플릿: {available_splits}")
+        #
+        #     if dataset_split is not None and dataset_split in available_splits:
+        #         available_splits = [dataset_split]
+        #
+        # elif
+        # else:
+        #     available_splits = list(dataset.keys())
 
         # 결과 저장 딕셔너리
         results_all_splits = {}
@@ -1078,7 +1103,7 @@ def process_batch(options):
             result_file = path.join(result_prefix, f"{safe_model_name}_{split_name}.jsonl")
 
             # 스플릿별 데이터셋 로드
-            split_df = dataset[split_name].to_pandas()
+            split_df = dataset.to_pandas() if is_dataset else dataset[split_name].to_pandas()
 
             # 테스트 크기 제한 적용 (옵션으로만 제한)
             if hasattr(options, 'test_size') and options.test_size is not None and isinstance(options.test_size, int):

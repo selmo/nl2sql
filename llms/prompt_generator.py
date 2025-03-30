@@ -35,20 +35,22 @@ def make_prompt(model: str, data, options=None):
 
     batch_mode = options.get('mode', BatchMode.NL2SQL)
     evaluation = options.get('evaluation', False)
+    field_question = options.get('question_column', 'question')
+    field_answer = options.get('answer_column', 'answer')
 
     # NL2SQL 모드 (기존 로직)
     if batch_mode == BatchMode.NL2SQL:
         if evaluation:
             return evaluation_template.format(
                 schema=data.get('context', ''),
-                question=data.get('question', ''),
-                gt_sql=data.get('answer', ''),
+                question=data.get(field_question, ''),
+                gt_sql=data.get(field_answer, ''),
                 gen_sql=data.get('gen_sql', '')
             )
         else:
             return template.format(
                 schema=data.get('context', ''),
-                question=data.get('question', ''),
+                question=data.get(field_question, ''),
                 format_instructions=options.get('format_instructions', '')
             )
     # 번역 모드
