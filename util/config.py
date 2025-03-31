@@ -45,12 +45,14 @@ def parse_arguments():
                         help='질문 컬럼명')
     parser.add_argument('--answer-column', type=str, default="answer",
                         help='응답 컬럼명')
+    parser.add_argument('--no-evaluation', action='store_false', default=False,
+                        help='평가 절차 제외')
 
     # 모델 예열 관련 옵션 추가
     parser.add_argument('--warmup-model', action='store_true', default=True,
                         help='배치 처리 전 모델 예열 실행 (기본값: True)')
-    parser.add_argument('--no-warmup-model', action='store_false', dest='warmup_model',
-                        help='배치 처리 전 모델 예열 비활성화')
+    # parser.add_argument('--no-warmup-model', action='store_false', dest='warmup_model',
+    #                     help='배치 처리 전 모델 예열 비활성화')
 
     # 배치 모드 선택 (batch 명령 사용 시)
     parser.add_argument('--mode', type=str, choices=[mode.value for mode in BatchMode],

@@ -24,6 +24,12 @@ from util.eval_results_logger import EvalResultsLogger
 def prepare_evaluation(options):
     """병렬 처리를 사용한 테스트 데이터셋 준비 (진행률 로깅 기능 추가)"""
 
+    # 모델 예열 옵션 사용 (기본값: True)
+    no_evaluation = getattr(options, 'no_evaluation', False)
+
+    if not no_evaluation:
+        return []
+
     # 시작 시간 측정
     start_time = time.time()
 
