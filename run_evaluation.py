@@ -143,7 +143,6 @@ if __name__ == "__main__":
             test_dataset = evaluator.prepare_evaluation(args)
             evaluator.perform_evaluation(args, test_dataset)
 
-
         elif args.command == 'batch':
             # 배치 처리 실행
             results = evaluator.process_batch(args)
