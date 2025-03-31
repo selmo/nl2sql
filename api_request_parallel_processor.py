@@ -280,6 +280,13 @@ async def process_api_requests_from_file(
     current_batch_size = 0
     batch_start_index = 0
     total_batches = (total_requests + progress_tracker.batch_size - 1) // progress_tracker.batch_size
+
+    # 배치 크기가 0인 경우를 방지
+    progress_tracker.batch_size = max(1, progress_tracker.batch_size)
+
+    # 그 후 total_batches 계산
+    total_batches = (total_requests + progress_tracker.batch_size - 1) // progress_tracker.batch_size
+
     current_batch = 0
 
     # API 호출 래퍼 함수
@@ -845,8 +852,9 @@ def process_by_file(
     logging.info(f"Concurrent requests limit: {max_concurrent_requests}")
 
     # 배치 크기 조정 - 너무 작거나 크지 않도록
+    # 배치 크기 조정 - 너무 작거나 크지 않도록 (0인 경우 포함)
     batch_size = min(max(5, batch_size), 100)  # 최소 5, 최대 100
-    batch_size = min(batch_size, total_requests)  # 총 요청 수보다 크지 않도록
+    batch_size = max(1, min(batch_size, total_requests))  # 최소 1, 최대 total_requests
 
     # ProgressTracker 초기화
     progress_tracker = ProgressTracker(total_requests, batch_size)

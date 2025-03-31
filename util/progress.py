@@ -9,7 +9,7 @@ class ProgressTracker:
 
     def __init__(self, total_prompts, batch_size, log_dir="."):
         self.total_prompts = total_prompts
-        self.batch_size = batch_size
+        self.batch_size = max(1, batch_size)  # 배치 크기가 최소 1이 되도록 보장
         self.completed = 0
         self.successful = 0
         self.failed = 0
