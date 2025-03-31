@@ -101,8 +101,9 @@ check_first_token_time() {
 check_tokens_generated() {
     local file=$1
     # eval tokens 파싱 (다양한 형식 지원)
-    grep -o "eval [0-9]* tokens" "$file" | awk '{print $2}' | sort -n | tail -1 || \
+    grep -o "eval count: *[0-9]* token(s)" "$file" | awk '{print $3}' | sort -n | tail -1 || \
     grep -o "generated [0-9]* tokens" "$file" | awk '{print $2}' | sort -n | tail -1 || \
+    grep -o "eval [0-9]* tokens" "$file" | awk '{print $2}' | sort -n | tail -1 || \
     echo "N/A"
 }
 
@@ -434,10 +435,6 @@ EOF
 
     # 기존 그래프도 생성
     cat > "$RESULT_DIR/plot_speed.gnu" << EOF
-set terminal pngcairo size 1200,800 enhanced font 'Verdana,10'
-set output '$RESULT_DIR/token_speed_comparison.png'
-set title "모델별 토큰 생성 속도 비교 (tokens/sec)"
-set xlabel
 set terminal pngcairo size 1200,800 enhanced font 'Verdana,10'
 set output '$RESULT_DIR/token_speed_comparison.png'
 set title "모델별 토큰 생성 속도 비교 (tokens/sec)"
