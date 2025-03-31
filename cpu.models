@@ -1,0 +1,7 @@
+codellama:34b
+gemma3:27b
+qwq:latest
+sqlcoder-2:7b
+sqlcoder:15b
+sqlcoder:70b
+sqlcoder:latest
