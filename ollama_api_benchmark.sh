@@ -42,9 +42,10 @@ WARMUP=${5:-"true"}
 API_HOST=${OLLAMA_API_HOST:-"localhost"}
 API_PORT=${OLLAMA_API_PORT:-"11434"}
 API_BASE_URL="http://$API_HOST:$API_PORT/api"
+RESULT_BASE_DIR=${6:-"benchmark"}
 
 # 결과 디렉토리 생성
-RESULT_DIR="ollama_api_benchmark_$(date +%Y%m%d_%H%M%S)"
+RESULT_DIR="$RESULT_BASE_DIR/results_$(date +%Y%m%d_%H%M)"
 mkdir -p "$RESULT_DIR"
 
 # 환경 정보 보여주기

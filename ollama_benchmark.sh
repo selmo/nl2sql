@@ -42,6 +42,7 @@ REPEAT=${3:-5}
 ENV_TYPE=${4:-"auto"}  # 환경 타입: docker, local, auto(자동감지)
 COLD_START=${5:-"false"}  # 콜드 스타트 측정 여부: true, false (기본값: false)
 WARMUP=${6:-"true"}  # 성능 측정 전 웜업 실행 여부 (기본값: true)
+RESULT_BASE_DIR=${6:-"benchmark"}
 
 # 환경 타입 자동 감지
 if [ "$ENV_TYPE" = "auto" ]; then
@@ -137,7 +138,7 @@ if [ "$ENV_TYPE" = "docker" ]; then
 fi
 
 # 결과 저장 디렉토리 생성
-RESULT_DIR="ollama_benchmark_results_$(date +%Y%m%d_%H%M%S)"
+RESULT_DIR="$RESULT_BASE_DIR/results_$(date +%Y%m%d_%H%M)"
 mkdir -p "$RESULT_DIR"
 
 # Ollama 모델 정보 수집 및 모델 목록 가져오기

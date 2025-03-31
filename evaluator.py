@@ -184,7 +184,6 @@ def prepare_evaluation(options):
         # NL2SQL 변환 성능 측정 결과 기록
         nl2sql_stats = {
             'nl2sql_model': options.base_model,
-            'evaluator_model': '',  # 변환 단계에서는 평가자 모델 없음
             'test_dataset': getattr(options, 'test_dataset', ''),
             'test_size': len(df),
             'successful_count': success_count,  # 성공 수 추가
@@ -519,15 +518,12 @@ def perform_evaluation(options, dataset):
         'test_size': total_size,
         'successful_count': num_correct_answers,  # 성공 수 추가
         'accuracy': accuracy,
-        'avg_processing_time': verification_time / total_size if total_size > 0 else 0,
-        'batch_throughput': total_size / verification_time if verification_time > 0 else 0,
         'comments': f"정답 수: {num_correct_answers}/{total_size}",
         'phase': 'verification',
-        'avg_verification_time_s': verification_time / total_size if total_size > 0 else 0  # 변경: ms -> s 단위
     }
 
     # 모델 크기 추정 (가능한 경우)
-    model_name = model.lower()
+    model_name = options.base_model.lower()
     if '7b' in model_name:
         verification_stats['model_size'] = '7B'
     elif '8b' in model_name:
