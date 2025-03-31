@@ -127,6 +127,7 @@ function read_models_from_file {
 USE_FILES=false
 TEST_DATASET_CLI=""
 TEST_SIZE_CLI=""
+NO_EVAL=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -135,6 +136,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -f|--file)
       USE_FILES=true
+      shift
+      ;;
+    -e|--no-eval)
+      NO_EVAL=true
       shift
       ;;
     -d|--dataset)
@@ -166,6 +171,10 @@ fi
 if [ ! -z "$TEST_SIZE_CLI" ]; then
   TEST_SIZE="$TEST_SIZE_CLI"
   TEST_SIZE_OPT="--test-size $TEST_SIZE"
+fi
+
+if [ "$NO_EVAL" = true]; then
+  NO_EVAL_OPT="--no-evaluation"
 fi
 
 # 모델 목록 설정
@@ -224,7 +233,8 @@ for base_model in "${BASE_MODELS[@]}"; do
       --max-concurrent $MAX_CONCURRENT \
       --max-retries $MAX_RETRIES \
       $TEST_SIZE_OPT \
-      $TEST_DATASET_OPT"
+      $TEST_DATASET_OPT \
+      $NO_EVAL_OPT"
 
     log "명령: $cmd"
 
