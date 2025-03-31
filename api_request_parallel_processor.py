@@ -44,7 +44,7 @@ class APIRequest:
             retry_queue: asyncio.Queue,
             status_tracker: StatusTracker,
             save_filepath: str = None,
-            timeout: int = 60,
+            timeout: int = None,
             progress_tracker: ProgressTracker = None,
             response_processor=None,  # 추가: 응답 처리 함수
     ):
@@ -812,6 +812,7 @@ def process_by_file(
         batch_size: int = 20,  # 배치 크기 매개변수
         response_processor=None,  # 응답 처리 함수 추가
         prefix: str = ".",  # 로그 디렉토리 경로
+        request_timeout: int = 300,  # 요청 타임아웃 (초)
 ):
     """
     Process a batch of API requests from a JSONL file with rate limiting and parallel execution.
@@ -837,6 +838,10 @@ def process_by_file(
 
     # 총 요청 수 계산
     total_requests = 0
+
+    # 타임아웃 설정 (0 이하면 None으로 설정하여 무제한)
+    timeout = None if request_timeout <= 0 else request_timeout
+
     try:
         with open(requests_filepath) as file:
             for _ in file:
@@ -876,6 +881,7 @@ def process_by_file(
                 max_concurrent_requests=max_concurrent_requests,  # 동시 요청 수 제한 전달
                 progress_tracker=progress_tracker,  # 진행률 추적기 전달
                 response_processor=response_processor,  # 응답 처리 함수 전달
+                request_timeout=timeout,  # 타임아웃 전달
             )
         )
     except KeyboardInterrupt:

@@ -9,6 +9,7 @@ BATCH_SIZE=${BATCH_SIZE:-50}
 MAX_CONCURRENT=${MAX_CONCURRENT:-20}
 MAX_RETRIES=${MAX_RETRIES:-10}
 MODE=${MODE:-"ollama-api"}
+REQUEST_TIMEOUT=${REQUEST_TIMEOUT:-300}  # 기본값: 300초, 0=무제한
 LOG_DIR="${PREFIX}/logs"
 # TEST_SIZE 환경변수가 설정되어 있으면 해당 값을 사용
 TEST_SIZE_OPT=""
@@ -232,6 +233,7 @@ for base_model in "${BASE_MODELS[@]}"; do
       --batch-size $BATCH_SIZE \
       --max-concurrent $MAX_CONCURRENT \
       --max-retries $MAX_RETRIES \
+      --request-timeout $REQUEST_TIMEOUT \
       $TEST_SIZE_OPT \
       $TEST_DATASET_OPT \
       $NO_EVAL_OPT"

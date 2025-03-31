@@ -35,6 +35,10 @@ def parse_arguments():
                         help='최대 동시 요청 수 (ollama-api 명령 시 사용, 기본값: 10)')
     parser.add_argument('--max-retries', type=int, default=10,
                         help='최대 재시도 횟수 (ollama-api 명령 시 사용, 기본값: 10)')
+    # config.py의 parse_arguments 함수에 추가
+    parser.add_argument('--request-timeout', type=int, default=300,
+                        help='API 요청 타임아웃 (초, 0 = 무제한, 기본값: 300)')
+
     parser.add_argument('--test-size', type=int, default=None,
                         help='테스트집합 크기 (ollama-api 명령 시 사용)')
     parser.add_argument('--test-dataset', type=str, default="shangrilar/ko_text2sql:origin:test",

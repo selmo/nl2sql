@@ -383,6 +383,9 @@ def perform_evaluation(options, dataset):
     base_model = options.base_model
     model = options.verifying_model
 
+    # 타임아웃 옵션 추출 (없으면 기본값 사용)
+    request_timeout = getattr(options, 'request_timeout', 300)
+
     # # 모드 확인
     # batch_mode = BatchMode(options.mode)
     #
@@ -479,7 +482,8 @@ def perform_evaluation(options, dataset):
             max_concurrent_requests=options.max_concurrent if hasattr(options, 'max_concurrent') else 10,
             batch_size=options.batch_size if hasattr(options, 'batch_size') else 20,
             response_processor=eval_response_processor,  # 응답 처리 함수 전달
-            prefix=options.prefix  # 로그 디렉토리를 option.prefix로 설정
+            prefix=options.prefix,  # 로그 디렉토리를 option.prefix로 설정
+            request_timeout=request_timeout,  # 타임아웃 옵션 전달
         )
 
     verification_end_time = time.time()
