@@ -31,6 +31,7 @@
 ├── run_evaluation.py                 # 평가 명령을 위한 주요 진입점
 ├── evaluator.py                      # 핵심 평가 기능
 ├── api_request_parallel_processor.py # 속도 제한이 있는 병렬 API 요청 처리
+├── run_nl2sql.sh                     # 모델 조합 배치 실행 스크립트
 ├── requirements.txt                  # 프로젝트 의존성
 ├── llms/                             # LLM 관련 유틸리티
 │   ├── __init__.py                   # 패키지 정의
@@ -149,37 +150,63 @@ python run_evaluation.py upload --from-file [입력-파일] --upload-to-hf [hugg
 | `--answer-column` | 응답 컬럼명 | `answer` |
 | `--upload-to-hf` | 업로드할 Hugging Face 저장소 ID | `None` |
 
-## 추가 사용 예제
-
-### NL2SQL 평가
-
-```bash
-python run_evaluation.py eval --base-model sqlcoder:70b --verifying-model gemma3:27b --prefix ./results --test-size 100 --test-dataset shangrilar/ko_text2sql:origin:test
-```
-
-### 데이터셋 컬럼 번역 일괄처리
-
-```bash
-python run_evaluation.py batch --mode translate --base-model mistral:7b --ollama-url http://localhost:11434 --batch-size 20 --input-column question --output-column e_question --prefix ./translations
-```
-
-이 예제는 데이터셋의 'question' 컬럼을 번역하여 'e_question' 컬럼에 저장합니다.
-
-### Ollama로 대량의 쿼리 일괄 처리
-
-```bash
-python run_evaluation.py ollama-api --base-model sqlcoder:70b --ollama-url http://localhost:11434 --batch-size 20 --max-concurrent 5 --max-retries 3 --prefix ./batch-results
-```
-
 ## 여러 모델 조합 실행
 
-포함된 bash 스크립트를 사용하여 여러 모델 조합을 실행할 수 있습니다:
+`run_nl2sql.sh` 스크립트를 사용하여 여러 모델 조합을 실행할 수 있습니다:
+
+### 기본 사용법
 
 ```bash
 ./run_nl2sql.sh "sqlcoder:70b llama3:70b" "gemma3:27b gemma3:8b"
 ```
 
-이 명령은 지정된 모델의 모든 조합을 테스트합니다.
+### 환경변수 사용
+
+```bash
+TEST_SIZE=100 TEST_DATASET="shangrilar/ko_text2sql:clean:test" ./run_nl2sql.sh "sqlcoder:70b" "gemma3:27b"
+```
+
+### 명령줄 옵션 사용
+
+```bash
+./run_nl2sql.sh -s 50 -d "shangrilar/ko_text2sql:clean:test" "sqlcoder:70b" "gemma3:27b"
+```
+
+### 모델 파일 사용
+
+먼저 모델 목록이 포함된 파일을 생성:
+
+`base_models.txt`:
+```
+# 이 줄은 주석으로 무시됩니다
+sqlcoder:70b
+llama3:70b
+tulu3:8b
+```
+
+`verify_models.txt`:
+```
+gemma3:27b
+gemma3:8b
+```
+
+그리고 실행:
+```bash
+./run_nl2sql.sh -f base_models.txt verify_models.txt
+```
+
+### run_nl2sql.sh 스크립트 환경변수
+
+| 환경변수 | 설명 | 기본값 |
+|--------|-------------|---------|
+| `OLLAMA_URL` | Ollama 서버 URL | `172.16.15.112` |
+| `PREFIX` | 출력 디렉토리 경로 | `OUTPUT` |
+| `BATCH_SIZE` | 배치 크기 | `50` |
+| `MAX_CONCURRENT` | 최대 동시 요청 수 | `20` |
+| `MAX_RETRIES` | 최대 재시도 횟수 | `10` |
+| `MODE` | 실행 모드 | `ollama-api` |
+| `TEST_SIZE` | 테스트 크기 | (설정된 경우만 사용) |
+| `TEST_DATASET` | 테스트 데이터셋 | (설정된 경우만 사용) |
 
 ## 평가 결과 로깅
 
@@ -234,6 +261,7 @@ print(dataset_performance)
 - 상세한 로그는 프로세스 정보와 오류를 기록합니다
 - 테이블 형식의 결과 요약이 콘솔에 표시됩니다
 - 모든 실행 결과는 CSV 파일에 누적되어 저장됩니다
+- `run_nl2sql.sh` 실행 시 별도의 로그 파일이 생성됩니다 (`[prefix]/logs/run_nl2sql_*.log`)
 
 ## 기여
 
