@@ -269,8 +269,9 @@ def cmd_detect_dbms(args):
 
     if args.save_json:
         fn = args.output_dataset.replace("/", "_") + f"_{args.split}_dbms.json"
+        logging.info(f"[detect-dbms] Save to {fn}")
         save_dataset_to_json(new_ds, fn)
-        logging.info(f"[detect-dbms] Saved to {fn}")
+        logging.info(f"[detect-dbms] Saved.")
 
     push_dataset_to_hub(new_ds, args.output_dataset)
 
