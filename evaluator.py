@@ -373,7 +373,7 @@ def perform_evaluation(options, dataset):
     # 모델 예열 옵션 사용 (기본값: True)
     no_evaluation = getattr(options, 'no_evaluation', False)
 
-    if not no_evaluation:
+    if no_evaluation:
         return []
 
     # 검증 시작 시간 측정

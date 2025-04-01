@@ -19,14 +19,17 @@ def parse_arguments():
                         help='실행할 명령 (train, merge, test, eval, ollama-api, batch, upload')
     parser.add_argument('--prefix', type=str, default=".",
                         help='실행 데이터 디렉토리 접두사')
-    parser.add_argument('--ollama-url', type=str, default="",
+    parser.add_argument('--ollama-url', '--ollama_url', '--url',
+                        dest='ollama_url', type=str, default="",
                         help='ollama server 주소')
-    parser.add_argument('--base-model', type=str, default='qwq',
-                        help='기본 모델 이름')
+    parser.add_argument('--base-model', '--model',
+                        dest='base_model', type=str, default='', required=True,
+                        help='변환 모델 이름')
     parser.add_argument('--finetuned-model', type=str, default="",
                         help='파인튜닝된 모델 이름')
-    parser.add_argument('--verifying-model', type=str, default="gemma3:27b",
-                        help='검증용 모델 이름 (기본값: deepseek-r1:70b)')
+    parser.add_argument('--verifying-model', '--verifying_model', '--eval-model', '--eval_model',
+                        dest='verifying_model', type=str, default="gemma3:27b",
+                        help='검증용 모델 이름 (기본값: gemma3:27b)')
 
     # ollama-api 명령에 대한 추가 인수
     parser.add_argument('--batch-size', type=int, default=10,
@@ -36,12 +39,14 @@ def parse_arguments():
     parser.add_argument('--max-retries', type=int, default=10,
                         help='최대 재시도 횟수 (ollama-api 명령 시 사용, 기본값: 10)')
     # config.py의 parse_arguments 함수에 추가
-    parser.add_argument('--request-timeout', type=int, default=300,
-                        help='API 요청 타임아웃 (초, 0 = 무제한, 기본값: 300)')
+    parser.add_argument('--request-timeout', '--timeout', type=int, default=300,
+                        dest='request_timeout', help='API 요청 타임아웃 (초, 0 = 무제한, 기본값: 300)')
 
-    parser.add_argument('--test-size', type=int, default=None,
+    parser.add_argument('--test-size', '--test_size','--size',
+                        dest='test_size', type=int, default=None,
                         help='테스트집합 크기 (ollama-api 명령 시 사용)')
-    parser.add_argument('--test-dataset', type=str, default="shangrilar/ko_text2sql:origin:test",
+    parser.add_argument('--test-dataset', '--dataset',
+                        dest='test_dataset', type=str, default="shangrilar/ko_text2sql:origin:test",
                         help='테스트 데이터셋 이름 (기본값: "shangrilar/ko_text2sql:origin:test")')
     parser.add_argument('--results-file', type=str, default="[PREFIX]/nl2sql_eval_results.csv",
                         help='평가 결과를 저장할 CSV 파일 이름')

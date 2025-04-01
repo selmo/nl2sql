@@ -224,6 +224,7 @@ async def process_api_requests_from_file(
         max_concurrent_requests: int = 10,  # 동시 요청 수 제한
         progress_tracker: ProgressTracker = None,  # 진행률 추적기
         response_processor=None,  # 응답 처리 함수 추가
+        request_timeout=300
 ):
     """Processes API requests in parallel, throttling to stay under rate limits."""
     # constants
@@ -305,6 +306,7 @@ async def process_api_requests_from_file(
                     save_filepath=save_filepath,
                     status_tracker=status_tracker,
                     response_processor=response_processor,  # 응답 처리 함수 전달
+                    timeout=request_timeout
                 )
 
                 # 성공 시 상태 업데이트

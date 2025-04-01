@@ -59,7 +59,7 @@ def add_file_handler(log_filepath, level=logging.DEBUG):
     check_and_create_directory(log_dir)
 
     # 파일 핸들러 생성
-    file_handler = logging.FileHandler(log_filepath)
+    file_handler = logging.FileHandler(log_filepath, mode='a', encoding='utf-8')
     file_handler.setLevel(level)
     file_formatter = logging.Formatter(
         '%(asctime)s [%(name)s][%(levelname)s] %(message)s'
