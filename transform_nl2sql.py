@@ -213,17 +213,36 @@ def apply_dbms_detection(dataset, sql_field: str, dbms_field: str):
         return dataset
 
     new_dbms_list = []
+    valid_indices = []  # 유효한 데이터의 인덱스를 저장할 리스트
+
     for i in range(len(dataset)):
         sql_text = data_dict[sql_field][i]
         dbms_list = detect_dbms_no_class(sql_text)
+
         if not dbms_list:
+            # 빈 dbms 리스트인 경우 로깅하고 해당 데이터 제외
             logging.warning(
                 f"[apply_dbms_detection] INVALID SQL at index {i} => {repr(sql_text)}"
             )
-        new_dbms_list.append(dbms_list)
+        else:
+            # 유효한 dbms 리스트가 있는 경우 데이터 포함
+            valid_indices.append(i)
+            new_dbms_list.append(dbms_list)
 
-    data_dict[dbms_field] = new_dbms_list
-    return Dataset.from_dict(data_dict)
+    # 유효한 데이터만 필터링
+    filtered_data = {}
+    for key in data_dict:
+        filtered_data[key] = [data_dict[key][i] for i in valid_indices]
+
+    # dbms 필드 추가
+    filtered_data[dbms_field] = new_dbms_list
+
+    filtered_dataset = Dataset.from_dict(filtered_data)
+    logging.info(
+        f"[apply_dbms_detection] Filtered dataset: {len(filtered_dataset)}/{len(dataset)} items retained"
+    )
+
+    return filtered_dataset
 
 
 def save_dataset_to_json(dataset, file_name: str):
