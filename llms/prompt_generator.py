@@ -17,6 +17,56 @@ class SQL(BaseModel):
 sql_parser = PydanticOutputParser(pydantic_object=SQL)
 
 
+def get_dbms_specific_instructions(dbms):
+    """Generate DBMS-specific instructions"""
+    if not dbms:
+        return ""
+
+    instructions = {
+        "PostgreSQL": """
+Special Instructions (PostgreSQL):
+- Use PostgreSQL syntax
+- Use 'YYYY-MM-DD' format for dates
+- Use ILIKE for case-insensitive text searches
+- Use -> or ->> operators for JSON field access
+""",
+        "MySQL": """
+Special Instructions (MySQL):
+- Use MySQL syntax
+- Use 'YYYY-MM-DD' format for dates
+- Use LIKE for text searches
+- Use -> or ->> operators for JSON field access
+- Implement pagination using LIMIT and OFFSET
+""",
+        "Oracle": """
+Special Instructions (Oracle):
+- Use Oracle syntax
+- Use TO_DATE function for date formatting
+- Implement result limitation using ROWNUM
+- Use DUAL table appropriately
+- Use LIKE for text searches
+""",
+        "SQLite": """
+Special Instructions (SQLite):
+- Use SQLite syntax
+- Use 'YYYY-MM-DD' format for dates
+- Consider SQLite's limited function set
+- Use basic inner and outer joins instead of advanced join techniques
+"""
+    }
+
+    # Case-insensitive DBMS search
+    for key, value in instructions.items():
+        if key.lower() == dbms.lower():
+            return value
+
+    return ""  # Return empty string if no matching DBMS
+
+
+import logging
+import numpy as np
+
+
 def make_prompt(model: str, data, options=None):
     """
     다양한 모드를 지원하는 확장된 프롬프트 생성 함수
@@ -38,20 +88,41 @@ def make_prompt(model: str, data, options=None):
     field_question = options.get('question_column', 'question')
     field_answer = options.get('answer_column', 'answer')
 
-    # NL2SQL 모드 (기존 로직)
+    # DBMS 정보 추출
+    dbms = data.get('dbms', None)
+
+    if isinstance(dbms, list) or isinstance(dbms, np.ndarray):
+        if len(dbms) > 2:
+            dbms = "General DBMS"
+        elif len(dbms) > 1:
+            dbms = dbms[0]
+        else:
+            dbms = ""
+    else:
+        logging.info(f'dbms type: {type(dbms)}, {dbms}')
+        raise
+
+    # DBMS 특화 지시사항 생성
+    dbms_instructions = get_dbms_specific_instructions(dbms)
+
+    # NL2SQL 모드
     if batch_mode == BatchMode.NL2SQL:
         if evaluation:
             return evaluation_template.format(
                 schema=data.get('context', ''),
                 question=data.get(field_question, ''),
                 gt_sql=data.get(field_answer, ''),
-                gen_sql=data.get('gen_sql', '')
+                gen_sql=data.get('gen_sql', ''),
+                dbms=dbms or "SQL"  # 기본값으로 일반 SQL 지정
             )
         else:
+            # 기본 템플릿에 DBMS 정보 추가
             return template.format(
                 schema=data.get('context', ''),
                 question=data.get(field_question, ''),
-                format_instructions=options.get('format_instructions', '')
+                format_instructions=options.get('format_instructions', ''),
+                dbms=dbms or "SQL",  # 기본값으로 일반 SQL 지정
+                dbms_instructions=dbms_instructions
             )
     # 번역 모드
     elif batch_mode == BatchMode.TRANSLATION:

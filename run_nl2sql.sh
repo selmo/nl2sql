@@ -226,14 +226,14 @@ for base_model in "${BASE_MODELS[@]}"; do
 
     # 실행 명령
     cmd="python run_evaluation.py $MODE \
-      --ollama-url $OLLAMA_URL \
-      --base-model $base_model \
-      --verifying-model $verifying_model \
-      --prefix $PREFIX \
-      --batch-size $BATCH_SIZE \
-      --max-concurrent $MAX_CONCURRENT \
-      --max-retries $MAX_RETRIES \
-      --request-timeout $REQUEST_TIMEOUT \
+--url $OLLAMA_URL \
+--model $base_model \
+--eval-model $verifying_model \
+--prefix $PREFIX \
+--batch-size $BATCH_SIZE \
+--max-concurrent $MAX_CONCURRENT \
+--max-retries $MAX_RETRIES \
+--timeout $REQUEST_TIMEOUT \
       $TEST_SIZE_OPT \
       $TEST_DATASET_OPT \
       $NO_EVAL_OPT"

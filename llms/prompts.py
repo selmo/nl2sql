@@ -85,16 +85,20 @@ OUTPUT FORMAT:
   "gen_sql": "<SQL query that answers the user's question>"
 }}"""
 
-template = """You are a SQL generator. Convert natural language to SQL.
+template = """You are a SQL generator for {dbms}. Convert natural language to SQL.
 
 INPUT:
+- DBMS: {dbms}
 - Question: {question}
 - Schema: {schema}
+
+{dbms_instructions}
 
 RULES:
 - Return ONLY valid JSON with the SQL query
 - Use only tables and columns from the schema
 - No explanations or comments
+- Follow {dbms} syntax rules exactly
 
 EXAMPLE:
 Question: "Find employees in Sales department"
@@ -111,6 +115,33 @@ OUTPUT FORMAT:
 {{
   "gen_sql": "<SQL query>"
 }}"""
+
+# template = """You are a SQL generator. Convert natural language to SQL.
+#
+# INPUT:
+# - Question: {question}
+# - Schema: {schema}
+#
+# RULES:
+# - Return ONLY valid JSON with the SQL query
+# - Use only tables and columns from the schema
+# - No explanations or comments
+#
+# EXAMPLE:
+# Question: "Find employees in Sales department"
+# Schema:
+# CREATE TABLE employees (id INTEGER PRIMARY KEY, name VARCHAR(100), department_id INTEGER);
+# CREATE TABLE departments (id INTEGER PRIMARY KEY, name VARCHAR(50));
+#
+# Output:
+# {{
+#   "gen_sql": "SELECT e.* FROM employees e JOIN departments d ON e.department_id = d.id WHERE d.name = 'Sales'"
+# }}
+#
+# OUTPUT FORMAT:
+# {{
+#   "gen_sql": "<SQL query>"
+# }}"""
 
 translation_template = """
 You are a professional Korean-to-English translator specializing in database queries.
@@ -186,6 +217,7 @@ The query will run on a database with the following schema:
 Given the database schema, here is the SQL query that [QUESTION]{question}[/QUESTION]
 [SQL]
 {sql}"""
+
 k2sql_template = """당신은 SQL을 생성하는 SQL 봇입니다. DDL과 요청사항을 바탕으로 적절한 SQL 쿼리를 생성하세요.
 
 DDL:
