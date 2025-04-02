@@ -183,13 +183,20 @@ def make_request(model: str, prompt: str, options=None):
     requires_json = batch_mode == BatchMode.NL2SQL
 
     if is_gpt_model(model):
-        request = {
-            "model": model,
-            "messages": [{"role": "system", "content": prompt}]
-        }
+        # o1-mini 모델인 경우와 그 외 모델 구분
+        if model.lower().startswith('o1-mini'):
+            request = {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}]  # system 대신 user role 사용
+            }
+        else:
+            request = {
+                "model": model,
+                "messages": [{"role": "system", "content": prompt}]
+            }
 
         # NL2SQL 모드는 JSON 응답 필요
-        if requires_json:
+        if requires_json and not model.lower().startswith('o1-mini'):
             request["response_format"] = {"type": "json_object"}
 
         return request

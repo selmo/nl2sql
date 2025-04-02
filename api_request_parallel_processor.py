@@ -88,6 +88,7 @@ class APIRequest:
                     if response_processor and "error" not in response_json:
                         try:
                             processed_result = response_processor(response_json, self.metadata)
+                            # logging.info(f"processed_result: [{type(processed_result)}] {processed_result}")
                         except Exception as process_error:
                             logger.error(f"응답 처리 중 오류 발생 (요청 #{self.task_id}): {str(process_error)}")
                             # 처리 오류도 재시도 요인으로 간주
@@ -153,8 +154,20 @@ class APIRequest:
                     raise ConnectionError(f"속도 제한 오류: {error_message}")
             else:
                 # 성공한 응답
-                result_data = [self.request_json, response_json, self.metadata] if self.metadata else [
-                    self.request_json, response_json]
+                # 중요: 여기서 저장할 데이터에 processed_result가 있으면 그것을 포함
+                if self.metadata:
+                    if processed_result is not None:
+                        result_data = [self.request_json, processed_result, self.metadata]
+                    else:
+                        result_data = [self.request_json, response_json, self.metadata]
+                else:
+                    if processed_result is not None:
+                        result_data = [self.request_json, processed_result]
+                    else:
+                        result_data = [self.request_json, response_json]
+                # # 성공한 응답
+                # result_data = [self.request_json, response_json, self.metadata] if self.metadata else [
+                #     self.request_json, response_json]
 
         except (ConnectionError, TimeoutError, ValueError) as e:
             logger.warning(f"요청 #{self.task_id} 오류 발생: {str(e)}")
@@ -200,6 +213,7 @@ class APIRequest:
             # 성공한 결과
             data = result_data
             if save_filepath is not None:
+                # logging.info(f'append_to_jsonl: {data}')
                 append_to_jsonl(data, save_filepath)
                 logger.debug(f"요청 #{self.task_id} 결과가 {save_filepath}에 저장됨")
 
@@ -457,7 +471,7 @@ async def process_api_requests_from_file(
                         len(active_tasks) == 0 and
                         queue_of_requests_to_retry.empty() and
                         not file_not_finished):
-                    logging.info("All tasks completed - process terminating")
+                    logging.debug("All tasks completed - process terminating")
                     break
 
                 # 추가 안전장치: 모든 요청이 처리되었지만 추적 카운터가 일치하지 않는 경우

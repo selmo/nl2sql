@@ -271,20 +271,64 @@ def change_jsonl_to_csv(input_file, output_file='', prompt_column="prompt", resp
     responses = []
 
     with open(input_file, 'r') as json_file:
-        for data in json_file:
-            json_data = json.loads(data)
-            if model.lower().startswith('gpt') or model.startswith('o1') or model.startswith('o3'):
-                prompts.append(json_data[0]['messages'][0]['content'])
-                responses.append(json_data[1]['choices'][0]['message']['content'])
+        for line in json_file:
+            json_data = json.loads(line)
+
+            # 프롬프트 추출
+            if len(json_data) >= 1 and isinstance(json_data[0], dict):
+                if 'messages' in json_data[0]:
+                    # OpenAI 형식
+                    prompts.append(json_data[0]['messages'][0]['content'])
+                elif 'prompt' in json_data[0]:
+                    # Ollama 형식
+                    prompts.append(json_data[0]['prompt'])
+                else:
+                    prompts.append(str(json_data[0]))
             else:
-                prompts.append(json_data[0]['prompt'])
-                responses.append(json_data[1]['response'])
+                prompts.append("")
+
+            # 응답 추출
+            if len(json_data) >= 2 and isinstance(json_data[1], dict):
+                # 이미 처리된 결과인 경우 (resolve_yn 키가 바로 있는 경우)
+                if 'resolve_yn' in json_data[1]:
+                    # 딕셔너리에서 값을 직접 추출
+                    responses.append(json_data[1]['resolve_yn'])
+                # OpenAI 응답 형식
+                elif 'choices' in json_data[1] and len(json_data[1]['choices']) > 0:
+                    responses.append(json_data[1]['choices'][0]['message']['content'])
+                # Ollama 응답 형식
+                elif 'response' in json_data[1]:
+                    responses.append(json_data[1]['response'])
+                else:
+                    responses.append(str(json_data[1]))
+            else:
+                responses.append("")
 
     dfs = pd.DataFrame({prompt_column: prompts, response_column: responses})
     logging.info(f"change_jsonl_to_csv: input_file={input_file}, output_file={output_file}")
-    if not output_file == '':
+    if output_file:
         dfs.to_csv(output_file, index=False)
     return dfs
+
+# def change_jsonl_to_csv(input_file, output_file='', prompt_column="prompt", response_column="response", model="gpt"):
+#     prompts = []
+#     responses = []
+#
+#     with open(input_file, 'r') as json_file:
+#         for data in json_file:
+#             json_data = json.loads(data)
+#             if model.lower().startswith('gpt') or model.startswith('o1') or model.startswith('o3'):
+#                 prompts.append(json_data[0]['messages'][0]['content'])
+#                 responses.append(json_data[1]['choices'][0]['message']['content'])
+#             else:
+#                 prompts.append(json_data[0]['prompt'])
+#                 responses.append(json_data[1]['response'])
+#
+#     dfs = pd.DataFrame({prompt_column: prompts, response_column: responses})
+#     logging.info(f"change_jsonl_to_csv: input_file={input_file}, output_file={output_file}")
+#     if not output_file == '':
+#         dfs.to_csv(output_file, index=False)
+#     return dfs
 
 
 def sanitize_filename(filename):

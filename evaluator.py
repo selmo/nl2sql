@@ -28,9 +28,10 @@ def prepare_evaluation(options):
 
     model_prefix = join(options.prefix, "test")
     check_and_create_directory(model_prefix)
+    filepath_base = options.test_dataset + "." + options.base_model
 
     # 모델명을 안전한 파일명으로 변환
-    safe_model_name = util_common.sanitize_filename(options.base_model)
+    safe_model_name = util_common.sanitize_filename(filepath_base)
     filepath = join(model_prefix, f"{safe_model_name}.jsonl")
 
     if not Path(filepath).exists():
@@ -385,35 +386,10 @@ def perform_evaluation(options, dataset):
     # 타임아웃 옵션 추출 (없으면 기본값 사용)
     request_timeout = getattr(options, 'request_timeout', 300)
 
-    # # 모드 확인
-    # batch_mode = BatchMode(options.mode)
-    #
-    # # 입력/출력 컬럼 확인
-    # input_column = options.input_column
-    # output_column = options.output_column
-    #
-    # if batch_mode == BatchMode.NL2SQL:
-    #     # NL2SQL 모드는 기본 컬럼 사용
-    #     input_column = input_column or 'question'
-    #     output_column = output_column or 'gen_sql'
-    # elif batch_mode == BatchMode.TRANSLATION:
-    #     # 번역 모드는 명시적 컬럼 지정 필요
-    #     if not input_column or not output_column:
-    #         raise ValueError("Translation 모드에서는 input_column과 output_column이 필요합니다.")
-    #
-    # batch_options = {
-    #     'mode': batch_mode,
-    #     'source_lang': options.source_lang,
-    #     'target_lang': options.target_lang,
-    #     'input_column': input_column,
-    #     'output_column': output_column,
-    #     'batch_size': options.batch_size,
-    #     'max_retries': options.max_retries,
-    #     'max_concurrent': options.max_concurrent,
-    # }
-    #
+    filepath_base = options.test_dataset + "." + base_model
+
     # 모델명을 안전한 파일명으로 변환
-    safe_base_model = util_common.sanitize_filename(base_model)
+    safe_base_model = util_common.sanitize_filename(filepath_base)
     safe_model = util_common.sanitize_filename(model)
 
     result_prefix = join(options.prefix, 'eval')
@@ -424,6 +400,10 @@ def perform_evaluation(options, dataset):
     requests_filepath = join(result_prefix, f"{safe_base_model}_{safe_model}_requests.jsonl")
     save_filepath = join(result_prefix, f"{safe_base_model}_{safe_model}_results.jsonl")
     output_file = join(result_prefix, f"{safe_base_model}-{safe_model}.csv")
+
+    # 성공/실패 케이스용 파일 경로 추가
+    success_cases_file = join(result_prefix, f"{safe_base_model}-{safe_model}_success_cases.csv")
+    failure_cases_file = join(result_prefix, f"{safe_base_model}-{safe_model}_failure_cases.csv")
 
     logging.debug("DataFrame:\n%s", dataset)
     logging.info("Evaluation file path: %s", output_file)
@@ -445,28 +425,110 @@ def perform_evaluation(options, dataset):
             """평가 응답을 즉시 처리하는 함수"""
             try:
                 if isinstance(response, dict):
-                    # Ollama 응답 처리
-                    if 'response' in response:
-                        content = response['response']
-                        result = json.loads(content)
-                        if 'resolve_yn' in result:
-                            return result
-
-                    # OpenAI 응답 처리
-                    elif 'choices' in response and len(response['choices']) > 0:
+                    # OpenAI 응답 처리 (choices 필드가 있는 경우)
+                    if 'choices' in response and len(response['choices']) > 0:
                         content = response['choices'][0]['message']['content']
-                        result = json.loads(content)
-                        if 'resolve_yn' in result:
-                            return result
+                        return extract_resolve_yn_from_text(content)
 
-                # 처리할 수 없는 형식이면 오류 발생
+                    # Ollama 응답 처리 (response 필드가 있는 경우)
+                    elif 'response' in response:
+                        content = response['response']
+                        return extract_resolve_yn_from_text(content)
+
+                # 처리할 수 없는 형식
                 raise ValueError(f"응답 형식이 올바르지 않습니다: {response}")
-            except json.JSONDecodeError as e:
-                raise ValueError(f"JSON 파싱 오류: {str(e)}, 응답: {response}")
-            except KeyError as e:
-                raise ValueError(f"응답에 필요한 키가 없습니다: {str(e)}, 응답: {response}")
             except Exception as e:
                 raise ValueError(f"응답 처리 중 오류 발생: {str(e)}, 응답: {response}")
+
+        def extract_resolve_yn_from_text(content):
+            """텍스트에서 resolve_yn 값 추출"""
+            # 1. JSON 블록 추출 시도
+            json_match = re.search(r'```(?:json)?\s*(.*?)\s*```', content, re.DOTALL)
+            if json_match:
+                # logging.info(f'json_match: {json_match}')
+                content = json_match.group(1)
+                # logging.info(f'content: {content}')
+
+            # 2. JSON 파싱 시도
+            try:
+                json_data = json.loads(content)
+                # logging.info(f'json_data: {json_data}')
+                if 'resolve_yn' in json_data:
+                    return {"resolve_yn": json_data['resolve_yn']}
+            except json.JSONDecodeError:
+                pass
+
+            # 3. 직접 키-값 패턴 검색
+            if re.search(r'[\'\"]resolve_yn[\'\"]:\s*[\'\"]yes[\'\"]', content, re.IGNORECASE):
+                # logging.info(f'3. 직접 키-값 패턴 검색: yes')
+                return {"resolve_yn": "yes"}
+            elif re.search(r'[\'\"]resolve_yn[\'\"]:\s*[\'\"]no[\'\"]', content, re.IGNORECASE):
+                # logging.info(f'3. 직접 키-값 패턴 검색: no')
+                return {"resolve_yn": "no"}
+
+            # 4. 단순 텍스트 검색
+            # 먼저 "resolve_yn: yes"와 같은 패턴 검색
+            pattern = re.compile(r'resolve_yn\s*:?\s*[\'"]?(yes|no)[\'"]?', re.IGNORECASE)
+            match = pattern.search(content)
+            if match:
+                # logging.info(f'4. 단순 텍스트 검색: {match.group(1).lower()}')
+                return {"resolve_yn": match.group(1).lower()}
+
+            # 마지막으로 단순히 yes/no 단어 검색
+            if re.search(r'\byes\b', content, re.IGNORECASE):
+                return {"resolve_yn": "yes"}
+            elif re.search(r'\bno\b', content, re.IGNORECASE):
+                return {"resolve_yn": "no"}
+
+            # 결정할 수 없는 경우
+            return {"resolve_yn": "unknown"}
+        # def eval_response_processor(response, metadata=None):
+        #     """평가 응답을 즉시 처리하는 함수"""
+        #     try:
+        #         if isinstance(response, dict):
+        #             # Ollama 응답 처리
+        #             if 'response' in response:
+        #                 content = response['response']
+        #                 result = json.loads(content)
+        #                 if 'resolve_yn' in result:
+        #                     return result
+        #
+        #             # OpenAI 응답 처리
+        #             elif 'choices' in response and len(response['choices']) > 0:
+        #                 message = response['choices'][0]['message']
+        #                 content = message['content']
+        #
+        #                 # 코드 블록에서 JSON 추출 시도
+        #                 json_match = re.search(r'```(?:json)?\s*(.*?)\s*```', content, re.DOTALL)
+        #                 if json_match:
+        #                     content = json_match.group(1)
+        #
+        #                 try:
+        #                     result = json.loads(content)
+        #                     if 'resolve_yn' in result:
+        #                         return result
+        #                 except json.JSONDecodeError:
+        #                     # 파싱 실패 시 텍스트에서 'yes' 또는 'no' 추출 시도
+        #                     if 'yes' in content.lower():
+        #                         return {"resolve_yn": "yes"}
+        #                     elif 'no' in content.lower():
+        #                         return {"resolve_yn": "no"}
+        #                     raise ValueError(f"응답에서 'resolve_yn' 값을 추출할 수 없습니다: {content}")
+        #             # # OpenAI 응답 처리
+        #             # elif 'choices' in response and len(response['choices']) > 0:
+        #             #     content = response['choices'][0]['message']['content']
+        #             #     result = json.loads(content)
+        #             #     if 'resolve_yn' in result:
+        #             #         return result
+        #
+        #         # 처리할 수 없는 형식이면 오류 발생
+        #         raise ValueError(f"응답 형식이 올바르지 않습니다: {response}")
+        #     except json.JSONDecodeError as e:
+        #         raise ValueError(f"JSON 파싱 오류: {str(e)}, 응답: {response}")
+        #     except KeyError as e:
+        #         raise ValueError(f"응답에 필요한 키가 없습니다: {str(e)}, 응답: {response}")
+        #     except Exception as e:
+        #         raise ValueError(f"응답 처리 중 오류 발생: {str(e)}, 응답: {response}")
 
         api_request_parallel_processor.process_by_file(
             requests_filepath=requests_filepath,
@@ -498,8 +560,76 @@ def perform_evaluation(options, dataset):
     else:
         base_eval = pd.read_csv(output_file)
 
-    base_eval['resolve_yn'] = base_eval['resolve_yn'].apply(
-        lambda x: json.loads(x)['resolve_yn'] if isinstance(x, str) else x)
+    # 이 부분은 이제 필요하지 않을 수 있습니다. 이미 CSV에 값이 직접 저장되었기 때문입니다.
+    # 하지만 안전을 위해 남겨둘 수 있습니다.
+    def safe_extract_resolve_yn(x):
+        if isinstance(x, str):
+            if x in ['yes', 'no', 'unknown']:
+                return x
+            try:
+                if "'resolve_yn': 'yes'" in x or '"resolve_yn": "yes"' in x:
+                    return 'yes'
+                elif "'resolve_yn': 'no'" in x or '"resolve_yn": "no"' in x:
+                    return 'no'
+                else:
+                    parsed = json.loads(x)
+                    if isinstance(parsed, dict) and 'resolve_yn' in parsed:
+                        return parsed['resolve_yn']
+            except:
+                pass
+        return x
+
+    base_eval['resolve_yn'] = base_eval['resolve_yn'].apply(safe_extract_resolve_yn)
+    # # resolve_yn 값이 문자열 형태의 JSON인 경우 처리
+    # base_eval['resolve_yn'] = base_eval['resolve_yn'].apply(
+    #     lambda x: json.loads(x)['resolve_yn'] if isinstance(x, str) else x)
+
+    # 케이스 저장 함수 정의
+    def save_cases_by_result(result_value, output_file):
+        # result_value에 따른 케이스 추출 (yes 또는 no)
+        cases = base_eval[base_eval['resolve_yn'] == result_value].copy()
+
+        if not cases.empty:
+            # 결과 케이스의 인덱스 추출
+            case_indices = cases.index.tolist()
+
+            # 케이스에 대한 상세 정보를 담을 데이터프레임 생성
+            case_details = pd.DataFrame()
+
+            # 인덱스 정보 추가
+            case_details['index'] = case_indices
+
+            # 질문과 컨텍스트(schema) 정보 추가
+            case_details['question'] = [dataset.iloc[idx]['question'] if idx < len(dataset) else "" for idx in
+                                        case_indices]
+            case_details['context'] = [dataset.iloc[idx]['context'] if idx < len(dataset) else "" for idx in
+                                       case_indices]
+
+            # 정답 SQL과 생성된 SQL 추가
+            case_details['gt_sql'] = [dataset.iloc[idx]['answer'] if idx < len(dataset) else "" for idx in case_indices]
+            case_details['gen_sql'] = [dataset.iloc[idx]['gen_sql'] if idx < len(dataset) else "" for idx in
+                                       case_indices]
+
+            # 케이스 저장
+            case_details.to_csv(output_file, index=False)
+            return len(case_details)
+
+        return 0
+
+    # 성공 케이스 저장 (resolve_yn == 'yes')
+    success_count = save_cases_by_result('yes', success_cases_file)
+    if success_count > 0:
+        logging.info(f"성공 케이스를 {success_cases_file}에 저장했습니다 (총 {success_count}개)")
+    else:
+        logging.info("성공 케이스가 없습니다.")
+
+    # 실패 케이스 저장 (resolve_yn == 'no')
+    failure_count = save_cases_by_result('no', failure_cases_file)
+    if failure_count > 0:
+        logging.info(f"실패 케이스를 {failure_cases_file}에 저장했습니다 (총 {failure_count}개)")
+    else:
+        logging.info("실패 케이스가 없습니다.")
+
     num_correct_answers = base_eval.query("resolve_yn == 'yes'").shape[0]
     total_size = len(dataset)
     accuracy = (num_correct_answers / total_size) * 100 if total_size > 0 else 0
@@ -541,6 +671,7 @@ def perform_evaluation(options, dataset):
     logging.info(f"정확도: {accuracy:.2f}% ({num_correct_answers}/{total_size})")
     logging.info(f"평균 처리 시간: {(verification_time / total_size):.3f}초/쿼리")
     logging.info(f"총 소요 시간: {verification_time:.2f}초")
+    logging.info(f"성공 케이스: {num_correct_answers}개, 실패 케이스: {total_size - num_correct_answers}개")
     logging.info("==========================\n")
 
     # EvalResultsLogger 객체 생성 및 결과 로깅
@@ -555,18 +686,27 @@ def perform_evaluation(options, dataset):
     return base_eval, accuracy, eval_time
 
 
-# def perform_evaluation(option, dataset):
+# def perform_evaluation(options, dataset):
+#     # 모델 예열 옵션 사용 (기본값: True)
+#     no_evaluation = getattr(options, 'no_evaluation', False)
+#
+#     if no_evaluation:
+#         return []
+#
 #     # 검증 시작 시간 측정
 #     start_time = time.time()
 #
-#     base_model = option.base_model
-#     model = option.verifying_model
+#     base_model = options.base_model
+#     model = options.verifying_model
+#
+#     # 타임아웃 옵션 추출 (없으면 기본값 사용)
+#     request_timeout = getattr(options, 'request_timeout', 300)
 #
 #     # 모델명을 안전한 파일명으로 변환
 #     safe_base_model = util_common.sanitize_filename(base_model)
 #     safe_model = util_common.sanitize_filename(model)
 #
-#     result_prefix = join(option.prefix, 'eval')
+#     result_prefix = join(options.prefix, 'eval')
 #     if not Path(result_prefix).exists():
 #         Path(result_prefix).mkdir(parents=True)
 #
@@ -580,8 +720,7 @@ def perform_evaluation(options, dataset):
 #
 #     if not Path(requests_filepath).exists():
 #         # 평가를 위한 requests.jsonl 생성
-#         # jobs = make_request_jobs(model, dataset, evaluation=True)
-#         jobs = make_request_jobs(model, dataset, mode=BatchMode.NL2SQL, options={'evaluation': True})
+#         jobs = make_request_jobs(model, dataset, options={'evaluation': True})
 #
 #         with open(requests_filepath, "w") as f:
 #             for job in jobs:
@@ -591,20 +730,49 @@ def perform_evaluation(options, dataset):
 #     verification_start_time = time.time()
 #
 #     if not Path(save_filepath).exists():
+#         # 응답 처리 함수 정의
+#         def eval_response_processor(response, metadata=None):
+#             """평가 응답을 즉시 처리하는 함수"""
+#             try:
+#                 if isinstance(response, dict):
+#                     # Ollama 응답 처리
+#                     if 'response' in response:
+#                         content = response['response']
+#                         result = json.loads(content)
+#                         if 'resolve_yn' in result:
+#                             return result
+#
+#                     # OpenAI 응답 처리
+#                     elif 'choices' in response and len(response['choices']) > 0:
+#                         content = response['choices'][0]['message']['content']
+#                         result = json.loads(content)
+#                         if 'resolve_yn' in result:
+#                             return result
+#
+#                 # 처리할 수 없는 형식이면 오류 발생
+#                 raise ValueError(f"응답 형식이 올바르지 않습니다: {response}")
+#             except json.JSONDecodeError as e:
+#                 raise ValueError(f"JSON 파싱 오류: {str(e)}, 응답: {response}")
+#             except KeyError as e:
+#                 raise ValueError(f"응답에 필요한 키가 없습니다: {str(e)}, 응답: {response}")
+#             except Exception as e:
+#                 raise ValueError(f"응답 처리 중 오류 발생: {str(e)}, 응답: {response}")
+#
 #         api_request_parallel_processor.process_by_file(
 #             requests_filepath=requests_filepath,
 #             save_filepath=save_filepath,
-#             request_url=util_common.get_api_url(option.ollama_url, model),
+#             request_url=util_common.get_api_url(options.ollama_url, model),
 #             api_key=get_apikey(),
 #             max_requests_per_minute=2500,
 #             max_tokens_per_minute=100000,
 #             token_encoding_name="cl100k_base",
-#             max_attempts=option.max_retries if hasattr(option, 'max_retries') else 10,
+#             max_attempts=options.max_retries if hasattr(options, 'max_retries') else 10,
 #             logging_level=20,
-#             # max_concurrent_requests=option.max_concurrent if hasattr(option, 'max_concurrent') else 10,
-#             # batch_size=option.batch_size if hasattr(option, 'batch_size') else 20,
-#             # response_processor=process_response,  # 응답 처리 함수 전달
-#             prefix=option.prefix,  # 로그 디렉토리를 option.prefix로 설정
+#             max_concurrent_requests=options.max_concurrent if hasattr(options, 'max_concurrent') else 10,
+#             batch_size=options.batch_size if hasattr(options, 'batch_size') else 20,
+#             response_processor=eval_response_processor,  # 응답 처리 함수 전달
+#             prefix=options.prefix,  # 로그 디렉토리를 option.prefix로 설정
+#             request_timeout=request_timeout,  # 타임아웃 옵션 전달
 #         )
 #
 #     verification_end_time = time.time()
@@ -620,7 +788,8 @@ def perform_evaluation(options, dataset):
 #     else:
 #         base_eval = pd.read_csv(output_file)
 #
-#     base_eval['resolve_yn'] = base_eval['resolve_yn'].apply(lambda x: json.loads(x)['resolve_yn'])
+#     base_eval['resolve_yn'] = base_eval['resolve_yn'].apply(
+#         lambda x: json.loads(x)['resolve_yn'] if isinstance(x, str) else x)
 #     num_correct_answers = base_eval.query("resolve_yn == 'yes'").shape[0]
 #     total_size = len(dataset)
 #     accuracy = (num_correct_answers / total_size) * 100 if total_size > 0 else 0
@@ -633,24 +802,18 @@ def perform_evaluation(options, dataset):
 #
 #     # 검증 성능 측정 결과 기록
 #     verification_stats = {
-#         'nl2sql_model': option.base_model,
-#         'evaluator_model': option.verifying_model,
-#         'test_dataset': getattr(option, 'test_dataset', ''),
+#         'nl2sql_model': options.base_model,
+#         'evaluator_model': options.verifying_model,
+#         'test_dataset': getattr(options, 'test_dataset', ''),
 #         'test_size': total_size,
 #         'successful_count': num_correct_answers,  # 성공 수 추가
 #         'accuracy': accuracy,
-#         'avg_processing_time': verification_time / total_size if total_size > 0 else 0,
-#         'batch_throughput': total_size / verification_time if verification_time > 0 else 0,
-#         # 'batch_size': option.batch_size,
-#         # 'max_concurrent': option.max_concurrent,
-#         # 'max_retries': option.max_retries,
 #         'comments': f"정답 수: {num_correct_answers}/{total_size}",
 #         'phase': 'verification',
-#         'avg_verification_time_s': verification_time / total_size if total_size > 0 else 0  # 변경: ms -> s 단위
 #     }
 #
 #     # 모델 크기 추정 (가능한 경우)
-#     model_name = model.lower()
+#     model_name = options.base_model.lower()
 #     if '7b' in model_name:
 #         verification_stats['model_size'] = '7B'
 #     elif '8b' in model_name:
@@ -664,14 +827,14 @@ def perform_evaluation(options, dataset):
 #
 #     # 직접 로그 출력을 위한 상세 정보 출력
 #     logging.info("\n===== 검증 결과 요약 =====")
-#     logging.info(f"모델: {option.base_model}, 평가자: {option.verifying_model}")
+#     logging.info(f"모델: {options.base_model}, 평가자: {options.verifying_model}")
 #     logging.info(f"정확도: {accuracy:.2f}% ({num_correct_answers}/{total_size})")
 #     logging.info(f"평균 처리 시간: {(verification_time / total_size):.3f}초/쿼리")
 #     logging.info(f"총 소요 시간: {verification_time:.2f}초")
 #     logging.info("==========================\n")
 #
 #     # EvalResultsLogger 객체 생성 및 결과 로깅
-#     stats_dir = path.join(option.prefix, 'stats')
+#     stats_dir = path.join(options.prefix, 'stats')
 #     check_and_create_directory(stats_dir)
 #     verification_logger = EvalResultsLogger(output_dir=stats_dir,
 #                                             filename='nl2sql_verification_stats.csv')
