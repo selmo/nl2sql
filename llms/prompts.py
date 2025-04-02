@@ -240,6 +240,53 @@ Question: {question}
 gt_sql (ground truth): {gt_sql}
 gen_sql (generated): {gen_sql}"""
 
+eval_template_1 = """Based on below DDL and Question, evaluate if gen_sql correctly resolves the Question.
+If gen_sql and gt_sql produce the same results (functionally equivalent), return "yes" else return "no".
+Note that SQL queries might have different syntax but still return the same results.
+
+Consider the following as functionally equivalent:
+- Numeric values compared as strings ('1' vs 1)
+- Column names with or without quotes when they don't contain spaces
+- Different case sensitivity in SQL keywords (SELECT vs select)
+- Different spacing or formatting that doesn't affect execution
+
+Output JSON Format: {{"resolve_yn": ""}}
+
+DDL: {schema}
+Question: {question}
+gt_sql (ground truth): {gt_sql}
+gen_sql (generated): {gen_sql}"""
+
+eval_template_2 = """Based on below DDL and Question, evaluate if gen_sql correctly resolves the Question.
+If gen_sql and gt_sql would return the same result set when executed against the same database, return "yes" else return "no".
+
+Functional equivalence means:
+- Both queries select the same columns from the same tables
+- Both queries apply logically equivalent filtering conditions
+- Type differences that would be automatically converted (e.g., numeric 1 vs string '1') should be considered equivalent
+- Syntactic differences such as quoting identifiers or not should be ignored if they don't affect the result
+
+Output JSON Format: {{"resolve_yn": ""}}
+
+DDL: {schema}
+Question: {question}
+gt_sql (ground truth): {gt_sql}
+gen_sql (generated): {gen_sql}"""
+
+eval_template_3 = """Based on below DDL and Question, evaluate if gen_sql correctly answers the Question.
+Focus on whether both queries are trying to retrieve the same information, not on syntactic differences.
+
+For numeric comparisons, treat numeric literals (1) and string literals ('1') as equivalent when comparing with numeric columns.
+For identifier quoting, consider "Column" and Column as equivalent notations when they refer to the same column.
+
+If both queries would return the same rows when executed against the same database, return "yes" else return "no".
+
+Output JSON Format: {{"resolve_yn": ""}}
+
+DDL: {schema}
+Question: {question}
+gt_sql (ground truth): {gt_sql}
+gen_sql (generated): {gen_sql}"""
 
 # 번역 모드용 템플릿
 # translation_template = """\

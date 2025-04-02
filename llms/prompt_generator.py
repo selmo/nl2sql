@@ -2,7 +2,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from pandas import DataFrame
 from pydantic import BaseModel, Field
 
-from llms.prompts import template, translation_template, evaluation_template
+from llms.prompts import template, translation_template, evaluation_template, eval_template_1, eval_template_2, eval_template_3
 from util.config import BatchMode
 from util.util_common import is_gpt_model
 
@@ -97,10 +97,10 @@ def make_prompt(model: str, data, options=None):
         elif len(dbms) > 1:
             dbms = dbms[0]
         else:
-            dbms = ""
+            dbms = None
     else:
         logging.info(f'dbms type: {type(dbms)}, {dbms}')
-        raise
+        dbms = ""
 
     # DBMS 특화 지시사항 생성
     dbms_instructions = get_dbms_specific_instructions(dbms)
@@ -108,7 +108,8 @@ def make_prompt(model: str, data, options=None):
     # NL2SQL 모드
     if batch_mode == BatchMode.NL2SQL:
         if evaluation:
-            return evaluation_template.format(
+            # return evaluation_template.format(
+            return eval_template_1.format(
                 schema=data.get('context', ''),
                 question=data.get(field_question, ''),
                 gt_sql=data.get(field_answer, ''),
