@@ -482,53 +482,6 @@ def perform_evaluation(options, dataset):
 
             # 결정할 수 없는 경우
             return {"resolve_yn": "unknown"}
-        # def eval_response_processor(response, metadata=None):
-        #     """평가 응답을 즉시 처리하는 함수"""
-        #     try:
-        #         if isinstance(response, dict):
-        #             # Ollama 응답 처리
-        #             if 'response' in response:
-        #                 content = response['response']
-        #                 result = json.loads(content)
-        #                 if 'resolve_yn' in result:
-        #                     return result
-        #
-        #             # OpenAI 응답 처리
-        #             elif 'choices' in response and len(response['choices']) > 0:
-        #                 message = response['choices'][0]['message']
-        #                 content = message['content']
-        #
-        #                 # 코드 블록에서 JSON 추출 시도
-        #                 json_match = re.search(r'```(?:json)?\s*(.*?)\s*```', content, re.DOTALL)
-        #                 if json_match:
-        #                     content = json_match.group(1)
-        #
-        #                 try:
-        #                     result = json.loads(content)
-        #                     if 'resolve_yn' in result:
-        #                         return result
-        #                 except json.JSONDecodeError:
-        #                     # 파싱 실패 시 텍스트에서 'yes' 또는 'no' 추출 시도
-        #                     if 'yes' in content.lower():
-        #                         return {"resolve_yn": "yes"}
-        #                     elif 'no' in content.lower():
-        #                         return {"resolve_yn": "no"}
-        #                     raise ValueError(f"응답에서 'resolve_yn' 값을 추출할 수 없습니다: {content}")
-        #             # # OpenAI 응답 처리
-        #             # elif 'choices' in response and len(response['choices']) > 0:
-        #             #     content = response['choices'][0]['message']['content']
-        #             #     result = json.loads(content)
-        #             #     if 'resolve_yn' in result:
-        #             #         return result
-        #
-        #         # 처리할 수 없는 형식이면 오류 발생
-        #         raise ValueError(f"응답 형식이 올바르지 않습니다: {response}")
-        #     except json.JSONDecodeError as e:
-        #         raise ValueError(f"JSON 파싱 오류: {str(e)}, 응답: {response}")
-        #     except KeyError as e:
-        #         raise ValueError(f"응답에 필요한 키가 없습니다: {str(e)}, 응답: {response}")
-        #     except Exception as e:
-        #         raise ValueError(f"응답 처리 중 오류 발생: {str(e)}, 응답: {response}")
 
         api_request_parallel_processor.process_by_file(
             requests_filepath=requests_filepath,
