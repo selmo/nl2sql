@@ -257,10 +257,16 @@ async def process_api_requests_from_file(
 
     # 총 요청 수와 요청 ID 추적을 위한 추가 변수
     expected_ids = set()  # 추가: 예상되는 모든 요청 ID를 추적하는 세트
+    original_requests = {}  # 원본 요청 정보 저장
     total_requests = 0
     with open(requests_filepath) as file:
-        for _ in file:
-            expected_ids.add(total_requests)  # 요청 ID 추적 세트에 추가
+        for line_num, line in enumerate(file):
+            expected_ids.add(line_num)  # 요청 ID 추적 세트에 추가
+            try:
+                # 원본 요청 정보 저장
+                original_requests[line_num] = json.loads(line)
+            except json.JSONDecodeError:
+                pass  # 파싱 실패시 무시
             total_requests += 1
 
     # ProgressTracker 초기화 (인자로 받지 않았을 경우)
@@ -277,7 +283,7 @@ async def process_api_requests_from_file(
     next_request = None  # variable to hold the next request to call
     active_tasks = set()  # 현재 활성화된 작업 추적
     completed_tasks = set()  # 완료된 작업 추적
-    processed_ids = set()  # 추가: 처리된 요청 ID를 추적하는 세트
+    processed_ids = set()  # 추가: 처리된 요청 ID를 추적하는 세트 (성공 또는 실패 모두 포함)
 
     # 동시 요청 제한을 위한 세마포어
     request_semaphore = asyncio.Semaphore(max_concurrent_requests)
@@ -323,8 +329,8 @@ async def process_api_requests_from_file(
                     timeout=request_timeout
                 )
 
-                # 성공 시 상태 업데이트
-                if result is not None:  # None이 아니면 성공 (None은 재시도 필요)
+                # 성공 또는 최종 실패 시 처리됨으로 표시
+                if result is not None:  # None이 아니면 성공 또는 최종 실패 (None은 재시도 필요)
                     elapsed = time.time() - start_time
                     progress_tracker.update_task_progress(request_obj.task_id, "success", elapsed=elapsed)
                     completed_tasks.add(request_obj.task_id)
@@ -343,12 +349,14 @@ async def process_api_requests_from_file(
                     # 최종 실패
                     logging.error(f"Request #{request_obj.task_id} failed after all attempts: {str(e)}")
                     completed_tasks.add(request_obj.task_id)
-                    processed_ids.add(request_obj.task_id)  # 추가: 요청 ID 추적 세트에 추가
+                    processed_ids.add(request_obj.task_id)  # 요청 ID 추적 세트에 추가
 
                     # 실패 결과를 파일에 저장
-                    error_data = [request_obj.request_json, {"error": str(e)},
-                                  request_obj.metadata] if request_obj.metadata else [request_obj.request_json,
-                                                                                      {"error": str(e)}]
+                    error_data = [
+                        request_obj.request_json,
+                        {"error": str(e)},
+                        request_obj.metadata
+                    ]
                     append_to_jsonl(error_data, save_filepath)
 
                 return None
@@ -372,13 +380,14 @@ async def process_api_requests_from_file(
                         try:
                             # get new request
                             request_json = json.loads(next(requests))
+                            current_task_id = next(task_id_generator)
 
                             # "index" 키가 있는 경우에만 삭제
                             if "index" in request_json:
                                 del request_json["index"]
 
                             next_request = APIRequest(
-                                task_id=next(task_id_generator),
+                                task_id=current_task_id,
                                 request_json=request_json,
                                 token_consumption=num_tokens_consumed_from_request(
                                     request_json, api_endpoint, token_encoding_name
@@ -488,13 +497,15 @@ async def process_api_requests_from_file(
 
                         # 미처리 요청에 대한 오류 기록
                         for missing_id in missing_ids:
+                            # 원본 요청 정보가 있으면 사용, 없으면 최소 정보만 포함
+                            request_data = original_requests.get(missing_id, {"task_id": missing_id})
                             error_data = [
-                                {"task_id": missing_id},  # 원본 요청 정보가 없으므로 최소한의 정보만 포함
+                                request_data,
                                 {"error": "요청이 처리되지 않음 (유실)"},
                                 None
                             ]
                             append_to_jsonl(error_data, save_filepath)
-                            processed_ids.add(missing_id)
+                            processed_ids.add(missing_id)  # 처리됨으로 표시
 
                             # 상태 업데이트
                             status_tracker.num_tasks_failed += 1
@@ -514,25 +525,7 @@ async def process_api_requests_from_file(
                         f"but no active tasks remain. Forcing completion."
                     )
 
-                    # 추가: 처리되지 않은 요청 확인
-                    missing_ids = expected_ids - processed_ids
-                    if missing_ids:
-                        logging.warning(f"발견된 {len(missing_ids)}개의 미처리 요청: {missing_ids}")
-
-                        # 미처리 요청에 대한 오류 기록
-                        for missing_id in missing_ids:
-                            error_data = [
-                                {"task_id": missing_id},
-                                {"error": "요청이 처리되지 않음 (유실)"},
-                                None
-                            ]
-                            append_to_jsonl(error_data, save_filepath)
-
-                            # 상태 업데이트
-                            status_tracker.num_tasks_failed += 1
-
-                        logging.info(f"유실된 {len(missing_ids)}개 요청에 대한 오류 기록 완료")
-
+                    # 이미 모든 미처리 요청을 기록했으므로 중복 기록 방지
                     status_tracker.num_tasks_in_progress = 0
                     break
 
@@ -569,25 +562,6 @@ async def process_api_requests_from_file(
             logging.warning(
                 f"{status_tracker.num_rate_limit_errors} rate limit errors received. Consider running at a lower rate."
             )
-
-        # 최종 확인: 모든 요청이 처리되었는지 확인
-        missing_ids = expected_ids - processed_ids
-        if missing_ids:
-            logging.warning(f"최종 확인: {len(missing_ids)}개의 미처리 요청이 발견됨: {missing_ids}")
-
-            # 미처리 요청에 대한 오류 기록
-            for missing_id in missing_ids:
-                error_data = [
-                    {"task_id": missing_id},
-                    {"error": "최종 확인에서 요청이 처리되지 않은 것으로 확인됨"},
-                    None
-                ]
-                append_to_jsonl(error_data, save_filepath)
-
-                # 상태 업데이트
-                status_tracker.num_tasks_failed += 1
-
-            logging.info(f"최종 확인: 유실된 {len(missing_ids)}개 요청에 대한 오류 기록 완료")
 
     # 최종 진행 상태 마무리
     progress_tracker.close()
