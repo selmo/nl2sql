@@ -445,16 +445,13 @@ def perform_evaluation(options, dataset):
             # 1. JSON 블록 추출 시도
             json_match = re.search(r'```(?:json)?\s*(.*?)\s*```', content, re.DOTALL)
             if json_match:
-                # logging.info(f'json_match: {json_match}')
                 content = json_match.group(1)
-                # logging.info(f'content: {content}')
 
             # 2. JSON 파싱 시도
             try:
                 json_data = json.loads(content)
-                # logging.info(f'json_data: {json_data}')
                 if 'resolve_yn' in json_data:
-                    return {"resolve_yn": json_data['resolve_yn']}
+                    return {"resolve_yn": json_data['resolve_yn'].lower().strip()}
             except json.JSONDecodeError:
                 pass
 
@@ -472,7 +469,7 @@ def perform_evaluation(options, dataset):
             match = pattern.search(content)
             if match:
                 # logging.info(f'4. 단순 텍스트 검색: {match.group(1).lower()}')
-                return {"resolve_yn": match.group(1).lower()}
+                return {"resolve_yn": match.group(1).lower().strip()}
 
             # 마지막으로 단순히 yes/no 단어 검색
             if re.search(r'\byes\b', content, re.IGNORECASE):
@@ -543,25 +540,17 @@ def perform_evaluation(options, dataset):
         cases = base_eval[base_eval['resolve_yn'] == result_value].copy()
 
         if not cases.empty:
-            # 결과 케이스의 인덱스 추출
-            case_indices = cases.index.tolist()
-
-            # 케이스에 대한 상세 정보를 담을 데이터프레임 생성
+            # 안전한 인덱스 매핑을 위해 명시적 매핑 사용
             case_details = pd.DataFrame()
+            case_details['index'] = cases.index.tolist()
 
-            # 인덱스 정보 추가
-            case_details['index'] = case_indices
-
-            # 질문과 컨텍스트(schema) 정보 추가
-            case_details['question'] = [dataset.iloc[idx]['question'] if idx < len(dataset) else "" for idx in
-                                        case_indices]
-            case_details['context'] = [dataset.iloc[idx]['context'] if idx < len(dataset) else "" for idx in
-                                       case_indices]
-
-            # 정답 SQL과 생성된 SQL 추가
-            case_details['gt_sql'] = [dataset.iloc[idx]['answer'] if idx < len(dataset) else "" for idx in case_indices]
-            case_details['gen_sql'] = [dataset.iloc[idx]['gen_sql'] if idx < len(dataset) else "" for idx in
-                                       case_indices]
+            # 원본 데이터셋에서 정보 가져오기 전 데이터 검증
+            for idx, case_idx in enumerate(cases.index.tolist()):
+                if case_idx < len(dataset):
+                    case_details.at[idx, 'question'] = dataset.iloc[case_idx]['question']
+                    case_details.at[idx, 'context'] = dataset.iloc[case_idx]['context']
+                    case_details.at[idx, 'gt_sql'] = dataset.iloc[case_idx]['answer']
+                    case_details.at[idx, 'gen_sql'] = dataset.iloc[case_idx]['gen_sql']
 
             # 케이스 저장
             case_details.to_csv(output_file, index=False)
