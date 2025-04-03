@@ -272,44 +272,144 @@ def change_jsonl_to_csv(input_file, output_file='', prompt_column="prompt", resp
 
     with open(input_file, 'r') as json_file:
         for line in json_file:
-            json_data = json.loads(line)
+            try:
+                json_data = json.loads(line)
 
-            # 프롬프트 추출
-            if len(json_data) >= 1 and isinstance(json_data[0], dict):
-                if 'messages' in json_data[0]:
-                    # OpenAI 형식
-                    prompts.append(json_data[0]['messages'][0]['content'])
-                elif 'prompt' in json_data[0]:
-                    # Ollama 형식
-                    prompts.append(json_data[0]['prompt'])
+                # 프롬프트 추출
+                if len(json_data) >= 1 and isinstance(json_data[0], dict):
+                    if 'messages' in json_data[0]:
+                        # OpenAI 형식
+                        prompts.append(json_data[0]['messages'][0]['content'])
+                    elif 'prompt' in json_data[0]:
+                        # Ollama 형식
+                        prompts.append(json_data[0]['prompt'])
+                    else:
+                        prompts.append(str(json_data[0]))
                 else:
-                    prompts.append(str(json_data[0]))
-            else:
+                    prompts.append("")
+
+                # 응답 추출
+                if len(json_data) >= 2 and isinstance(json_data[1], dict):
+                    # resolve_yn 처리 로직 개선
+                    if response_column == "resolve_yn":
+                        if 'resolve_yn' in json_data[1]:
+                            # 응답 처리 함수에서 직접 처리된 경우
+                            resolve_yn = json_data[1]['resolve_yn']
+                            # 소문자로 통일하고 공백 제거
+                            responses.append(str(resolve_yn).lower().strip())
+                        else:
+                            # OpenAI 응답 형식에서 추출
+                            if 'choices' in json_data[1] and len(json_data[1]['choices']) > 0:
+                                content = json_data[1]['choices'][0]['message']['content']
+                                # JSON 추출 시도
+                                try:
+                                    parsed = json.loads(content)
+                                    if 'resolve_yn' in parsed:
+                                        responses.append(parsed['resolve_yn'].lower().strip())
+                                    else:
+                                        # 정규식으로 찾기
+                                        match = re.search(r'resolve_yn\s*:?\s*[\'"]?(yes|no)[\'"]?', content,
+                                                          re.IGNORECASE)
+                                        if match:
+                                            responses.append(match.group(1).lower().strip())
+                                        else:
+                                            # 간단한 yes/no 포함 여부
+                                            if "yes" in content.lower():
+                                                responses.append("yes")
+                                            elif "no" in content.lower():
+                                                responses.append("no")
+                                            else:
+                                                responses.append("unknown")
+                                except json.JSONDecodeError:
+                                    # 정규식으로 찾기
+                                    match = re.search(r'resolve_yn\s*:?\s*[\'"]?(yes|no)[\'"]?', content, re.IGNORECASE)
+                                    if match:
+                                        responses.append(match.group(1).lower().strip())
+                                    else:
+                                        # 간단한 yes/no 포함 여부
+                                        if "yes" in content.lower():
+                                            responses.append("yes")
+                                        elif "no" in content.lower():
+                                            responses.append("no")
+                                        else:
+                                            responses.append("unknown")
+
+                            # Ollama 응답 형식에서 추출
+                            elif 'response' in json_data[1]:
+                                content = json_data[1]['response']
+                                # JSON 추출 시도
+                                try:
+                                    parsed = json.loads(content)
+                                    if 'resolve_yn' in parsed:
+                                        responses.append(parsed['resolve_yn'].lower().strip())
+                                    else:
+                                        # 정규식으로 찾기
+                                        match = re.search(r'resolve_yn\s*:?\s*[\'"]?(yes|no)[\'"]?', content,
+                                                          re.IGNORECASE)
+                                        if match:
+                                            responses.append(match.group(1).lower().strip())
+                                        else:
+                                            # 간단한 yes/no 포함 여부
+                                            if "yes" in content.lower():
+                                                responses.append("yes")
+                                            elif "no" in content.lower():
+                                                responses.append("no")
+                                            else:
+                                                responses.append("unknown")
+                                except json.JSONDecodeError:
+                                    # 정규식으로 찾기
+                                    match = re.search(r'resolve_yn\s*:?\s*[\'"]?(yes|no)[\'"]?', content, re.IGNORECASE)
+                                    if match:
+                                        responses.append(match.group(1).lower().strip())
+                                    else:
+                                        # 간단한 yes/no 포함 여부
+                                        if "yes" in content.lower():
+                                            responses.append("yes")
+                                        elif "no" in content.lower():
+                                            responses.append("no")
+                                        else:
+                                            responses.append("unknown")
+                            else:
+                                responses.append("unknown")
+                    else:
+                        # 일반 응답 처리
+                        if 'choices' in json_data[1] and len(json_data[1]['choices']) > 0:
+                            # OpenAI 응답
+                            responses.append(json_data[1]['choices'][0]['message']['content'])
+                        elif 'response' in json_data[1]:
+                            # Ollama 응답
+                            responses.append(json_data[1]['response'])
+                        else:
+                            # 그 외 응답
+                            responses.append(str(json_data[1]))
+                else:
+                    responses.append("")
+            except json.JSONDecodeError as e:
+                logging.error(f"JSON 파싱 오류: {e}, 라인: {line}")
                 prompts.append("")
+                responses.append("error")
+            except Exception as e:
+                logging.error(f"일반 오류: {e}, 라인: {line}")
+                prompts.append("")
+                responses.append("error")
 
-            # 응답 추출
-            if len(json_data) >= 2 and isinstance(json_data[1], dict):
-                # 이미 처리된 결과인 경우 (resolve_yn 키가 바로 있는 경우)
-                if 'resolve_yn' in json_data[1]:
-                    # 딕셔너리에서 값을 직접 추출
-                    responses.append(json_data[1]['resolve_yn'])
-                # OpenAI 응답 형식
-                elif 'choices' in json_data[1] and len(json_data[1]['choices']) > 0:
-                    responses.append(json_data[1]['choices'][0]['message']['content'])
-                # Ollama 응답 형식
-                elif 'response' in json_data[1]:
-                    responses.append(json_data[1]['response'])
-                else:
-                    responses.append(str(json_data[1]))
-            else:
-                responses.append("")
+    # 로깅 추가
+    logging.info(f"JSONL 파일에서 {len(prompts)}개 항목 추출")
+
+    # response_column이 "resolve_yn"인 경우 값 분포 로깅
+    if response_column == "resolve_yn":
+        yes_count = sum(1 for r in responses if r == "yes")
+        no_count = sum(1 for r in responses if r == "no")
+        unknown_count = sum(1 for r in responses if r != "yes" and r != "no")
+        logging.info(f"resolve_yn 값 분포: yes={yes_count}, no={no_count}, 기타={unknown_count}")
 
     dfs = pd.DataFrame({prompt_column: prompts, response_column: responses})
     logging.info(f"change_jsonl_to_csv: input_file={input_file}, output_file={output_file}")
+
     if output_file:
         dfs.to_csv(output_file, index=False)
-    return dfs
 
+    return dfs
 # def change_jsonl_to_csv(input_file, output_file='', prompt_column="prompt", response_column="response", model="gpt"):
 #     prompts = []
 #     responses = []

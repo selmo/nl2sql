@@ -510,31 +510,46 @@ def perform_evaluation(options, dataset):
     else:
         base_eval = pd.read_csv(output_file)
 
-    # 이 부분은 이제 필요하지 않을 수 있습니다. 이미 CSV에 값이 직접 저장되었기 때문입니다.
-    # 하지만 안전을 위해 남겨둘 수 있습니다.
+    # resolve_yn 값 정리 함수
     def safe_extract_resolve_yn(x):
+        """다양한 형태의 resolve_yn 값을 일관된 형식으로 변환"""
         if isinstance(x, str):
-            if x in ['yes', 'no', 'unknown']:
-                return x
+            # 이미 'yes', 'no', 'unknown'인 경우 그대로 반환
+            x_lower = x.lower().strip()
+            if x_lower in ['yes', 'no', 'unknown']:
+                return x_lower
+
+            # 추가: 단순 텍스트 검색
+            if x.lower().startswith('yes'):
+                return 'yes'
+            elif x.lower().startswith('no'):
+                return 'no'
+
+            # JSON 문자열로 저장된 경우 처리
             try:
+                # 패턴 확인
                 if "'resolve_yn': 'yes'" in x or '"resolve_yn": "yes"' in x:
                     return 'yes'
                 elif "'resolve_yn': 'no'" in x or '"resolve_yn": "no"' in x:
                     return 'no'
-                else:
-                    parsed = json.loads(x)
-                    if isinstance(parsed, dict) and 'resolve_yn' in parsed:
-                        return parsed['resolve_yn']
+
+                # JSON 파싱 시도
+                parsed = json.loads(x)
+                if isinstance(parsed, dict) and 'resolve_yn' in parsed:
+                    return parsed['resolve_yn'].lower().strip()
             except:
                 pass
+
+        # 그 외 경우는 그대로 반환
         return x
 
+    # resolve_yn 값 일관성 있게 변환
     base_eval['resolve_yn'] = base_eval['resolve_yn'].apply(safe_extract_resolve_yn)
-    # # resolve_yn 값이 문자열 형태의 JSON인 경우 처리
-    # base_eval['resolve_yn'] = base_eval['resolve_yn'].apply(
-    #     lambda x: json.loads(x)['resolve_yn'] if isinstance(x, str) else x)
 
-    # 케이스 저장 함수 정의
+    # 디버깅을 위한 로깅 추가
+    logging.info(f"resolve_yn 값 분포: {base_eval['resolve_yn'].value_counts().to_dict()}")
+
+    # 케이스 저장 함수 정의 - 수정
     def save_cases_by_result(result_value, output_file):
         # result_value에 따른 케이스 추출 (yes 또는 no)
         cases = base_eval[base_eval['resolve_yn'] == result_value].copy()
@@ -626,7 +641,6 @@ def perform_evaluation(options, dataset):
     verification_logger.log_evaluation_result(verification_stats)
 
     return base_eval, accuracy, eval_time
-
 
 # def perform_evaluation(options, dataset):
 #     # 모델 예열 옵션 사용 (기본값: True)
