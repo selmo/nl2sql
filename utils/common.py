@@ -111,25 +111,6 @@ def load_dataset_from_path(dataset_path_str):
     return df.to_pandas()
 
 
-# def load_dataset(options):
-#     """
-#     옵션에 따라 데이터셋 로드
-#
-#     Args:
-#         options: 명령행 옵션
-#
-#     Returns:
-#         DataFrame: 로드된 데이터셋
-#     """
-#     if options.mode == BatchMode.NL2SQL.value:
-#         from datasets import load_dataset
-#         df = load_dataset("shangrilar/ko_text2sql", "origin")['test']
-#         df = df.to_pandas()
-#         if options.test_size is not None:
-#             df = df[:options.test_size]
-#         return df
-
-
 def is_gpt_model(model: str):
     return (True
             if model.lower().startswith('gpt') or model.lower().startswith('o1') or model.lower().startswith('o3')
@@ -171,48 +152,6 @@ def check_and_create_directory(filepath):
     if not Path(filepath).exists():
         Path(filepath).mkdir(parents=True)
     return filepath
-
-
-# def clean_filepath(filepath, prefix=''):
-#     filepath = join(prefix, filepath)
-#     if exists(filepath):
-#         os.remove(filepath)
-#
-#     return filepath
-#
-#
-# def make_request_jobs(model, prompts):
-#     if is_gpt_model(model):
-#         jobs = [{"model": model,
-#                  "response_format": {
-#                      "type": "json_object"
-#                  },
-#                  "messages": [
-#                      {"role": "system",
-#                       "content": prompt}
-#                  ]
-#                  } for prompt in prompts
-#                 ]
-#     else:
-#         jobs = [make_request(model, prompt, evaluation=True) for prompt in prompts]
-#     return jobs
-#
-#
-# def make_prompts_for_evaluation(df):
-#     prompts = []
-#     for idx, row in df.iterrows():
-#         prompts.append(
-#             """Based on below DDL and Question, evaluate gen_sql can resolve Question.
-# If gen_sql and gt_sql do equal job, return "yes" else return "no". Output JSON Format: {"resolve_yn": ""}""" +
-#             f"""
-#
-# DDL: {row['context']}
-# Question: {row['question']}
-# gt_sql: {row['answer']}
-# gen_sql: {row['gen_sql']}"""
-#         )
-#
-#     return prompts
 
 
 # model: str,
@@ -269,7 +208,7 @@ def autotrain(
 def change_jsonl_to_csv(input_file, output_file='', prompt_column="prompt", response_column="response", model="gpt"):
     prompts = []
     responses = []
-    promreses = []
+    prompts_and_responses = []
 
     with open(input_file, 'r') as json_file:
         for line in json_file:
@@ -292,7 +231,7 @@ def change_jsonl_to_csv(input_file, output_file='', prompt_column="prompt", resp
                     prompt = ""
 
                 prompts.append(prompt)
-                promres = {'prompt' : prompt }
+                prompt_and_response = { prompt_column : prompt }
 
                 # 응답 추출
                 if len(json_data) >= 2 and isinstance(json_data[1], dict):
@@ -392,23 +331,21 @@ def change_jsonl_to_csv(input_file, output_file='', prompt_column="prompt", resp
                     response = ""
 
                 responses.append(response)
-                promres['response'] = response
-                promreses.append(promres)
-
-                logging.info(f"promress: {promres}")
+                prompt_and_response[response_column] = response
+                prompts_and_responses.append(prompts_and_responses)
 
             except json.JSONDecodeError as e:
                 logging.error(f"JSON 파싱 오류: {e}, 라인: {line}")
                 prompts.append("")
                 responses.append("error")
-                promres['response'] = response
-                promreses.append(promres)
+                prompt_and_response[response_column] = response
+                prompts_and_responses.append(prompts_and_responses)
             except Exception as e:
                 logging.error(f"일반 오류: {e}, 라인: {line}")
                 prompts.append("")
                 responses.append("error")
-                promres['response'] = response
-                promreses.append(promres)
+                prompt_and_response[response_column] = response
+                prompts_and_responses.append(prompts_and_responses)
 
     # 로깅 추가
     logging.info(f"JSONL 파일에서 {len(prompts)}개 항목 추출")
@@ -427,25 +364,6 @@ def change_jsonl_to_csv(input_file, output_file='', prompt_column="prompt", resp
         dfs.to_csv(output_file, index=False)
 
     return dfs
-# def change_jsonl_to_csv(input_file, output_file='', prompt_column="prompt", response_column="response", model="gpt"):
-#     prompts = []
-#     responses = []
-#
-#     with open(input_file, 'r') as json_file:
-#         for data in json_file:
-#             json_data = json.loads(data)
-#             if model.lower().startswith('gpt') or model.startswith('o1') or model.startswith('o3'):
-#                 prompts.append(json_data[0]['messages'][0]['content'])
-#                 responses.append(json_data[1]['choices'][0]['message']['content'])
-#             else:
-#                 prompts.append(json_data[0]['prompt'])
-#                 responses.append(json_data[1]['response'])
-#
-#     dfs = pd.DataFrame({prompt_column: prompts, response_column: responses})
-#     logging.info(f"change_jsonl_to_csv: input_file={input_file}, output_file={output_file}")
-#     if not output_file == '':
-#         dfs.to_csv(output_file, index=False)
-#     return dfs
 
 
 def sanitize_filename(filename):

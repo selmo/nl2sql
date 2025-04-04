@@ -3,10 +3,10 @@ import logging
 import sys
 import os
 import os.path as path
-import evaluator
-from evaluator import prepare_finetuning, merge_model
-from util import config
-from util.util_common import check_and_create_directory, autotrain
+
+import nl2sql_core
+from utils import config
+from utils.common import check_and_create_directory, autotrain
 
 
 def setup_root_logger():
@@ -108,7 +108,7 @@ if __name__ == "__main__":
         if args.command == 'train':
             datapath = path.join(args.prefix, 'data')
             check_and_create_directory(datapath)
-            prepare_finetuning(args)
+            nl2sql_core.prepare_finetuning(args)
 
             # 모델 학습 시간 측정
             autotrain(args,
@@ -133,26 +133,26 @@ if __name__ == "__main__":
                       )
 
         elif args.command == 'merge':
-            merge_model(args.base_model, args.finetuned_model, args.prefix)
+            nl2sql_core.merge_model(args.base_model, args.finetuned_model, args.prefix)
 
         elif args.command == 'test' or args.command == 'eval':
-            test_dataset = evaluator.prepare_evaluation_hf(args.base_model, args.prefix, args.test_size)
-            evaluator.perform_evaluation(args, test_dataset)
+            test_dataset = nl2sql_core.prepare_evaluation_hf(args.base_model, args.prefix, args.test_size)
+            nl2sql_core.perform_evaluation(args, test_dataset)
 
         elif args.command == 'ollama-api':
-            test_dataset = evaluator.prepare_evaluation(args)
-            evaluator.perform_evaluation(args, test_dataset)
+            test_dataset = nl2sql_core.prepare_evaluation(args)
+            nl2sql_core.perform_evaluation(args, test_dataset)
 
         elif args.command == 'batch':
             # 배치 처리 실행
-            results = evaluator.process_batch(args)
+            results = nl2sql_core.process_batch(args)
 
             # 결과 요약
             logging.info(f"배치 처리 완료: {len(results)}개 항목 처리됨")
 
         elif args.command == 'upload':
             # 배치 처리 실행
-            evaluator.process_upload(args.from_file, args.upload_to_hf)
+            nl2sql_core.process_upload(args.from_file, args.upload_to_hf)
 
         else:
             print('사용 가능한 명령: train, merge, test, eval, ollama-api, batch, upload')

@@ -5,7 +5,7 @@ import argparse
 from typing import List, Dict, Set
 from datasets import load_dataset, Dataset
 
-from util.config import get_hf_token
+from utils.config import get_hf_token
 
 try:
     import sqlglot
