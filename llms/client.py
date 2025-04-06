@@ -10,7 +10,7 @@ from pandas import DataFrame
 
 from llms.templates import make_prompt, make_request
 from utils.config import BatchMode
-from utils.sql_extractor import extract_sql_queries, extract_resolve_yn_from_text
+from utils.common import extract_sql_queries, extract_resolve_yn_from_text
 from utils.tracking import ProgressTracker
 
 
@@ -229,11 +229,15 @@ async def llm_invoke_batch(model: str,
                         return {"error": error_text, "task_id": task_id}
 
                 result = await response.json()
+                logging.debug(f'request: {request}')
+                logging.debug(f'response: {result}')
+
                 elapsed = time.time() - start_time
 
-                # 클라이언트 코드에서만 task_id 관리
-                local_result = {"orig_response": result, "task_id": task_id}
 
+                # # 클라이언트 코드에서만 task_id 관리
+                # local_result = {"orig_response": result, "task_id": task_id}
+                #
                 # 응답 처리 시도 (response_processor가 있는 경우)
                 if response_processor:
                     try:
@@ -452,6 +456,7 @@ def process_nl2sql_response(response: Dict[str, Any], metadata: Optional[Dict[st
 
     # 처리할 수 없는 응답
     raise ValueError(f"응답에서 SQL 쿼리를 추출할 수 없습니다: {response}")
+
 
 def process_evaluation_response(response: Dict[str, Any], metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """

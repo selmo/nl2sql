@@ -259,9 +259,9 @@ for base_model in "${BASE_MODELS[@]}"; do
 --max-concurrent $MAX_CONCURRENT \
 --max-retries $MAX_RETRIES \
 --timeout $REQUEST_TIMEOUT \
-      $TEST_SIZE_OPT \
-      $TEST_DATASET_OPT \
-      $NO_EVAL_OPT"
+$TEST_SIZE_OPT \
+$TEST_DATASET_OPT \
+$NO_EVAL_OPT"
 
     log "명령: $cmd"
 

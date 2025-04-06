@@ -15,12 +15,11 @@ from llms.templates import make_request_jobs, make_prompt
 from utils import common
 from os.path import join
 from utils.config import get_apikey, BatchMode, get_hf_token
-from utils.common import change_jsonl_to_csv, upload_to_huggingface
+from utils.common import change_jsonl_to_csv, upload_to_huggingface, extract_resolve_yn_from_text
 from os import path
 from pathlib import Path
 from utils.common import check_and_create_directory, get_api_url, sanitize_filename, load_dataset
 from utils.reporting import EvalResultsLogger
-from utils.sql_extractor import extract_resolve_yn_from_text
 
 
 def prepare_evaluation(options):

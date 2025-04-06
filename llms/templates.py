@@ -103,23 +103,33 @@ def make_prompt(model: str, data, options=None):
     # NL2SQL 모드
     if batch_mode == BatchMode.NL2SQL or str(batch_mode) == "nl2sql":
         if evaluation:
-            # return evaluation_template.format(
-            return eval_template_1.format(
+            return evaluation_template.format(
+            # return eval_template_1.format(
                 schema=data.get('context', ''),
                 question=data.get(field_question, ''),
                 gt_sql=data.get(field_answer, ''),
                 gen_sql=data.get('gen_sql', ''),
-                dbms=dbms or "SQL"  # 기본값으로 일반 SQL 지정
+                # dbms=dbms or "SQL"  # 기본값으로 일반 SQL 지정
             )
         else:
-            # 기본 템플릿에 DBMS 정보 추가
-            return template.format(
-                schema=data.get('context', ''),
-                question=data.get(field_question, ''),
-                format_instructions=options.get('format_instructions', ''),
-                dbms=dbms or "SQL",  # 기본값으로 일반 SQL 지정
-                dbms_instructions=dbms_instructions
-            )
+            # return sqlcoder_template_2.format(
+            #     schema=data.get('context', ''),
+            #     question=data.get(field_question, ''),
+            # )
+            if model.lower().startswith('sqlcoder'):
+                return sqlcoder_template_2.format(
+                    schema=data.get('context', ''),
+                    question=data.get(field_question, ''),
+                )
+            else:
+                # 기본 템플릿에 DBMS 정보 추가
+                return template_0.format(
+                    schema=data.get('context', ''),
+                    question=data.get(field_question, ''),
+                    # format_instructions=options.get('format_instructions', ''),
+                    # dbms=dbms or "SQL",  # 기본값으로 일반 SQL 지정
+                    # dbms_instructions=dbms_instructions
+                )
     # 번역 모드
     elif batch_mode == BatchMode.TRANSLATION:
         input_column = options.get('input_column', 'text')
@@ -396,6 +406,33 @@ OUTPUT FORMAT:
   "gen_sql": "<SQL query>"
 }}"""
 
+template_0 = """You are a SQL generator. Convert natural language to SQL.
+
+INPUT:
+- Question: {question}
+- Schema: {schema}
+
+RULES:
+- Return ONLY valid JSON with the SQL query
+- Use only tables and columns from the schema
+- No explanations or comments
+
+EXAMPLE:
+Question: "Find employees in Sales department"
+Schema: 
+CREATE TABLE employees (id INTEGER PRIMARY KEY, name VARCHAR(100), department_id INTEGER);
+CREATE TABLE departments (id INTEGER PRIMARY KEY, name VARCHAR(50));
+
+Output:
+{{
+  "gen_sql": "SELECT e.* FROM employees e JOIN departments d ON e.department_id = d.id WHERE d.name = 'Sales'"
+}}
+
+OUTPUT FORMAT:
+{{
+  "gen_sql": "<SQL query>"
+}}"""
+
 translation_template = """
 You are a professional Korean-to-English translator specializing in database queries.
 
@@ -459,7 +496,7 @@ Based on your instructions, here is the SQL query I have generated to answer the
 """
 
 sqlcoder_template_2 = """### Task
-Generate a SQL query to answer [QUESTION]{request}[/QUESTION]
+Generate a SQL query to answer [QUESTION]{question}[/QUESTION]
 
 ### Database Schema
 The query will run on a database with the following schema:
@@ -468,7 +505,7 @@ The query will run on a database with the following schema:
 ### Answer
 Given the database schema, here is the SQL query that [QUESTION]{question}[/QUESTION]
 [SQL]
-{sql}"""
+"""
 
 k2sql_template = """당신은 SQL을 생성하는 SQL 봇입니다. DDL과 요청사항을 바탕으로 적절한 SQL 쿼리를 생성하세요.
 
@@ -490,6 +527,7 @@ DDL: {schema}
 Question: {question}
 gt_sql (ground truth): {gt_sql}
 gen_sql (generated): {gen_sql}"""
+
 eval_template_1 = """Based on below DDL and Question, evaluate if gen_sql correctly resolves the Question.
 If gen_sql and gt_sql produce the same results (functionally equivalent), return "yes" else return "no".
 Note that SQL queries might have different syntax but still return the same results.
@@ -522,6 +560,7 @@ DDL: {schema}
 Question: {question}
 gt_sql (ground truth): {gt_sql}
 gen_sql (generated): {gen_sql}"""
+
 eval_template_3 = """Based on below DDL and Question, evaluate if gen_sql correctly answers the Question.
 Focus on whether both queries are trying to retrieve the same information, not on syntactic differences.
 
