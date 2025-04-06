@@ -327,10 +327,6 @@ print(dataset_performance)
 
 이 파일들은 `run_nl2sql.sh` 스크립트와 함께 `-f` 옵션을 사용할 때 참조할 수 있습니다.
 
-## 기여
-
-기여는 환영합니다! Pull Request를 제출해 주세요.
-
 ## 라이센스
 
 [라이센스 정보]
