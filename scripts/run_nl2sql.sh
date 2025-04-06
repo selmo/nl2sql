@@ -2,6 +2,31 @@
 # run_nl2sql.sh
 # NL2SQL 모델 조합 배치 실행을 위한 스크립트
 
+
+VERSION="1.0"
+DATE="2025-04-06"  # 오늘 날짜로 설정
+DEVELOPER="thchoi@GTOne"
+
+# 버전 정보 출력 함수
+print_version_info() {
+    echo
+    echo "$(basename "$0") 버전 $VERSION"
+    echo "마지막 업데이트: $DATE"
+    echo "개발자: $DEVELOPER"
+    echo "----------------------------------------"
+    echo
+}
+
+# 명령줄 인자 처리
+if [[ "$1" == "-v" || "$1" == "--version" ]]; then
+    print_version_info
+    exit 0
+fi
+
+# 일반적인 실행 시에도 버전 정보 출력
+print_version_info
+echo "----------------------------------------"
+
 # 기본 설정 (환경변수가 없는 경우 기본값)
 OLLAMA_URL=${OLLAMA_URL:-"172.16.15.112"}
 PREFIX=${PREFIX:-"OUTPUT"}

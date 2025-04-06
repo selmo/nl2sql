@@ -280,9 +280,10 @@ def make_request_jobs(model: str, dataset: DataFrame, options=None):
     jobs = []
 
     for _, data in dataset.iterrows() if hasattr(dataset, 'iterrows') else enumerate(dataset):
+        task_id = data.get('task_id')
         prompt = make_prompt(model, data, options)
         request = make_request(model, prompt, options)
-        jobs.append(request)
+        jobs.append({ 'task_id' : task_id, 'request': request })
 
     return jobs
 

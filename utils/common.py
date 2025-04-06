@@ -205,17 +205,19 @@ def autotrain(
     os.execv(path, [path] + args)
 
 
-def change_jsonl_to_csv(input_file, output_file='', prompt_column="prompt", response_column="response", model="gpt"):
+def change_jsonl_to_csv(input_file, prompt_column="prompt", response_column="response", model="gpt"):
     prompts = []
     responses = []
+    task_ids = []
     prompts_and_responses = []
 
     with open(input_file, 'r') as json_file:
+        # logging.info(f'input_file: {input_file}')
         for line in json_file:
             # logging.info(f"line: {line}")
             try:
                 json_data = json.loads(line)
-                # logging.info(f"json_data: {json_data}\n\n")
+                logging.info(f"json_data: {json_data}\n\n")
 
                 # 프롬프트 추출
                 if len(json_data) >= 1 and isinstance(json_data[0], dict):
@@ -332,20 +334,40 @@ def change_jsonl_to_csv(input_file, output_file='', prompt_column="prompt", resp
 
                 responses.append(response)
                 prompt_and_response[response_column] = response
-                prompts_and_responses.append(prompts_and_responses)
+
+                # 응답 추출
+                if len(json_data) >= 3 and isinstance(json_data[2], dict):
+                    task_id = json_data[2]['task_id']
+                else:
+                    task_id = ''
+
+                task_ids.append(task_id)
+
+                prompt_and_response['task_id'] = task_id
+                prompts_and_responses.append(prompt_and_response)
 
             except json.JSONDecodeError as e:
                 logging.error(f"JSON 파싱 오류: {e}, 라인: {line}")
                 prompts.append("")
                 responses.append("error")
+                task_ids.append("error")
+
+                prompt_and_response[prompt_column] = prompt
                 prompt_and_response[response_column] = response
-                prompts_and_responses.append(prompts_and_responses)
+                prompt_and_response['task_id'] = task_id
+                prompts_and_responses.append(prompt_and_response)
+
             except Exception as e:
                 logging.error(f"일반 오류: {e}, 라인: {line}")
                 prompts.append("")
                 responses.append("error")
+                task_ids.append("error")
+
+                prompt_and_response[prompt_column] = prompt
                 prompt_and_response[response_column] = response
-                prompts_and_responses.append(prompts_and_responses)
+                prompt_and_response['task_id'] = task_id
+                prompts_and_responses.append(prompt_and_response)
+
 
     # 로깅 추가
     logging.info(f"JSONL 파일에서 {len(prompts)}개 항목 추출")
@@ -357,11 +379,7 @@ def change_jsonl_to_csv(input_file, output_file='', prompt_column="prompt", resp
         unknown_count = sum(1 for r in responses if r != "yes" and r != "no")
         logging.info(f"resolve_yn 값 분포: yes={yes_count}, no={no_count}, 기타={unknown_count}")
 
-    dfs = pd.DataFrame({prompt_column: prompts, response_column: responses})
-    logging.info(f"change_jsonl_to_csv: input_file={input_file}, output_file={output_file}")
-
-    if output_file:
-        dfs.to_csv(output_file, index=False)
+    dfs = pd.DataFrame({'task_id': task_ids, prompt_column: prompts, response_column: responses})
 
     return dfs
 

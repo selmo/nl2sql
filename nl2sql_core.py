@@ -9,7 +9,8 @@ from peft import PeftModel
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
 import utils.parallel
-from llms.client import get_processor_for_mode, llm_invoke_parallel, process_response_by_mode
+from llms.client import get_processor_for_mode, llm_invoke_parallel, process_response_by_mode, \
+    process_evaluation_results
 from llms.templates import make_request_jobs, make_prompt
 from utils import common
 from os.path import join
@@ -199,20 +200,20 @@ def perform_evaluation(options, dataset):
     save_filepath = join(result_prefix, f"{safe_base_model}_{safe_model}_results.jsonl")
     output_file = join(result_prefix, f"{safe_base_model}-{safe_model}.csv")
 
-    # 성공/실패 케이스용 파일 경로 추가
-    success_cases_file = join(result_prefix, f"{safe_base_model}-{safe_model}_success_cases.csv")
-    failure_cases_file = join(result_prefix, f"{safe_base_model}-{safe_model}_failure_cases.csv")
+    # # 성공/실패 케이스용 파일 경로 추가
+    # success_cases_file = join(result_prefix, f"{safe_base_model}-{safe_model}_success_cases.csv")
+    # failure_cases_file = join(result_prefix, f"{safe_base_model}-{safe_model}_failure_cases.csv")
 
-    logging.debug("DataFrame:\n%s", dataset)
+    # logging.info("DataFrame:\n%s", dataset)
     logging.info("Evaluation file path: %s", output_file)
 
     if not Path(requests_filepath).exists():
         # 평가를 위한 requests.jsonl 생성
-        jobs = make_request_jobs(model, dataset, options={'evaluation': True})
+        jobs_with_id = make_request_jobs(model, dataset, options={'evaluation': True})
 
         with open(requests_filepath, "w") as f:
-            for job in jobs:
-                json_string = json.dumps(job)
+            for job_with_id in jobs_with_id:
+                json_string = json.dumps(job_with_id)
                 f.write(json_string + "\n")
 
     verification_start_time = time.time()
@@ -222,21 +223,11 @@ def perform_evaluation(options, dataset):
         def eval_response_processor(response, metadata=None):
             """평가 응답을 즉시 처리하는 함수"""
             try:
-                # 요청 ID 추출 (있는 경우)
-                request_id = response.get('request_id', None)
-                task_id = response.get('task_id', None)
-
                 if isinstance(response, dict):
                     # OpenAI 응답 처리 (choices 필드가 있는 경우)
                     if 'choices' in response and len(response['choices']) > 0:
                         content = response['choices'][0]['message']['content']
                         result = extract_resolve_yn_from_text(content)
-
-                        # 요청 ID 및 작업 ID 추가
-                        if request_id:
-                            result['request_id'] = request_id
-                        if task_id:
-                            result['task_id'] = task_id
 
                         return result
 
@@ -244,12 +235,6 @@ def perform_evaluation(options, dataset):
                     elif 'response' in response:
                         content = response['response']
                         result = extract_resolve_yn_from_text(content)
-
-                        # 요청 ID 및 작업 ID 추가
-                        if request_id:
-                            result['request_id'] = request_id
-                        if task_id:
-                            result['task_id'] = task_id
 
                         return result
 
@@ -292,147 +277,24 @@ def perform_evaluation(options, dataset):
     if not Path(output_file).exists():
         base_eval = change_jsonl_to_csv(
             save_filepath,
-            output_file,
             response_column="resolve_yn",
             model=model
         )
+
+        # Process results and save success/failure cases
+        base_eval, success_count, failure_count = process_evaluation_results(
+            base_eval,
+            dataset,
+            result_prefix,
+            f"{safe_base_model}-{safe_model}"
+        )
+
+        # Now save the fully processed data
+        base_eval.to_csv(output_file, index=False)
+        logging.info(f"Processed evaluation data saved to {output_file}, {len(base_eval)} rows, columns={base_eval.columns.tolist()}")
     else:
         base_eval = pd.read_csv(output_file)
-
-    logging.info(f"평가 데이터 로드: {len(base_eval)}행, 컬럼={base_eval.columns.tolist()}")
-
-    # resolve_yn 값 일관성 있게 변환
-    def safe_extract_resolve_yn(x):
-        """다양한 형태의 resolve_yn 값을 일관된 형식으로 변환"""
-        if isinstance(x, str):
-            # 이미 'yes', 'no', 'unknown'인 경우 그대로 반환
-            x_lower = x.lower().strip()
-            if x_lower in ['yes', 'no', 'unknown']:
-                return x_lower
-
-            # 추가: 단순 텍스트 검색
-            if x.lower().startswith('yes'):
-                return 'yes'
-            elif x.lower().startswith('no'):
-                return 'no'
-
-            # JSON 문자열로 저장된 경우 처리
-            try:
-                # 패턴 확인
-                if "'resolve_yn': 'yes'" in x or '"resolve_yn": "yes"' in x:
-                    return 'yes'
-                elif "'resolve_yn': 'no'" in x or '"resolve_yn": "no"' in x:
-                    return 'no'
-
-                # JSON 파싱 시도
-                parsed = json.loads(x)
-                if isinstance(parsed, dict) and 'resolve_yn' in parsed:
-                    return parsed['resolve_yn'].lower().strip()
-            except:
-                pass
-
-        # 그 외 경우는 그대로 반환
-        return x
-
-    base_eval['resolve_yn'] = base_eval['resolve_yn'].apply(safe_extract_resolve_yn)
-
-    # 요청 ID와 작업 ID를 결과에 추가 (있는 경우)
-    if 'request_id' not in base_eval.columns and 'prompt' in base_eval.columns:
-        # prompt 열에서 ID 추출 시도
-        try:
-            base_eval['request_id'] = base_eval['prompt'].apply(
-                lambda x: json.loads(x)['metadata']['request_id']
-                if isinstance(x, str) and 'metadata' in json.loads(x)
-                else None
-            )
-        except:
-
-            logging.warning("요청 ID를 prompt 열에서 추출할 수 없습니다: %s", base_eval['prompt'])
-
-    # 디버깅을 위한 로깅 추가
-    logging.info(f"resolve_yn 값 분포: {base_eval['resolve_yn'].value_counts().to_dict()}")
-
-    # 케이스 저장 함수 수정
-    def save_cases_by_result(result_value, output_file):
-        import json
-
-        # gen_sql 필드가 JSON 문자열인 경우 SQL 쿼리만 추출하는 함수
-        def extract_sql_from_json(data):
-            if isinstance(data, dict) and 'gen_sql' in data:
-                return data['gen_sql']
-            try:
-                # JSON 파싱 시도
-                parsed_data = json.loads(data)
-                # gen_sql 키가 있는 경우
-                if isinstance(parsed_data, dict) and 'gen_sql' in parsed_data:
-                    return parsed_data['gen_sql']
-                return parsed_data  # 추출 실패 시 원본 반환
-            except:
-                return data  # JSON 파싱 실패 시 원본 반환
-
-        # result_value에 따른 케이스 추출 (yes 또는 no)
-        cases = base_eval[base_eval['resolve_yn'] == result_value].copy()
-
-        if not cases.empty:
-            # 안전한 인덱스 매핑을 위해 명시적 매핑 사용
-            case_details = pd.DataFrame()
-
-            # 인덱스 정보 추가
-            case_details['index'] = cases.index.tolist()
-
-            # 나머지 컬럼에 대해 기본값 설정
-            case_details['question'] = ""
-            case_details['context'] = ""
-            case_details['gt_sql'] = ""
-            case_details['gen_sql'] = ""
-            case_details['prompt'] = ""
-            case_details['request_id'] = ""
-            case_details['task_id'] = ""
-
-            # 원본 데이터셋에서 정보 가져오기
-            for idx, case_idx in enumerate(cases.index.tolist()):
-                if case_idx < len(dataset):
-                    # dataset에 있는 컬럼만 안전하게 접근
-                    if 'question' in dataset.columns:
-                        case_details.at[idx, 'question'] = dataset.iloc[case_idx]['question']
-                    if 'context' in dataset.columns:
-                        case_details.at[idx, 'context'] = dataset.iloc[case_idx]['context']
-                    if 'answer' in dataset.columns:
-                        case_details.at[idx, 'gt_sql'] = dataset.iloc[case_idx]['answer']
-
-                    # gen_sql 컬럼 유무 확인 - 중요한 수정 부분
-                    if 'gen_sql' in dataset.columns:
-                        data = dataset.iloc[case_idx]['gen_sql']
-                        case_details.at[idx, 'gen_sql'] = extract_sql_from_json(data)
-                        case_details.at[idx, 'request_id'] = data['request_id']
-                        case_details.at[idx, 'task_id'] = data['task_id']
-                    else:
-                        # gen_sql 컬럼이 없으면 빈 값으로 설정
-                        case_details.at[idx, 'gen_sql'] = ""
-
-                    # prompt 컬럼 조회 전 확인
-                    if 'prompt' in cases.columns and idx < len(cases):
-                        case_details.at[idx, 'prompt'] = cases.iloc[idx]['prompt']
-
-            # 케이스 저장
-            case_details.to_csv(output_file, index=False)
-            return len(case_details)
-
-        return 0
-
-    # 성공 케이스 저장 (resolve_yn == 'yes')
-    success_count = save_cases_by_result('yes', success_cases_file)
-    if success_count > 0:
-        logging.info(f"성공 케이스를 {success_cases_file}에 저장했습니다 (총 {success_count}개)")
-    else:
-        logging.info("성공 케이스가 없습니다.")
-
-    # 실패 케이스 저장 (resolve_yn == 'no')
-    failure_count = save_cases_by_result('no', failure_cases_file)
-    if failure_count > 0:
-        logging.info(f"실패 케이스를 {failure_cases_file}에 저장했습니다 (총 {failure_count}개)")
-    else:
-        logging.info("실패 케이스가 없습니다.")
+        logging.info(f"Evaluation data loaded: {len(base_eval)} rows, columns={base_eval.columns.tolist()}")
 
     # 정확도 계산
     num_correct_answers = base_eval.query("resolve_yn == 'yes'").shape[0]
@@ -524,7 +386,7 @@ def evaluation_api(model, dataset, prefix='', batch_size=10, max_concurrent=10, 
 
     # prompts = make_prompts_for_evaluation(dataset)
     # jobs = util_common.make_request_jobs(model, prompts)
-    jobs = make_request_jobs(model, dataset, evaluation=True)
+    jobs = make_request_jobs(model, dataset, options={'evaluation': True})
 
     with open(requests_filepath, "w") as f:
         for job in jobs:

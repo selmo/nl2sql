@@ -88,45 +88,51 @@ class EvalResultsLogger:
         return eval_data
 
     def _print_table(self, eval_data):
-        """평가 결과를 테이블 형식으로 콘솔에 출력"""
-        # 데이터 정리
-        headers = ["항목", "값"]
+        """Displays evaluation results in a tabular format on the console"""
+        # Prepare data
+        headers = ["Metric", "Value"]
         table_data = []
 
-        # 기본 정보
-        table_data.append(["실행 시간", eval_data.get('timestamp', 'N/A')])
-        table_data.append(["NL2SQL 모델", eval_data.get('nl2sql_model', 'N/A')])
+        # Function to add section headers
+        def add_section_header(title):
+            table_data.append([f"=== {title} ===", ""])
+
+        # Basic Information Section
+        add_section_header("Basic Information")
+        table_data.append(["Execution Time", eval_data.get('timestamp', 'N/A')])
+        table_data.append(["NL2SQL Model", eval_data.get('nl2sql_model', 'N/A')])
         if 'evaluator_model' in eval_data and eval_data.get('evaluator_model'):
-            table_data.append(["평가자 모델", eval_data.get('evaluator_model', 'N/A')])
-        table_data.append(["테스트셋", eval_data.get('test_dataset', 'N/A')])
-        table_data.append(["테스트 크기", eval_data.get('test_size', 'N/A')])
+            table_data.append(["Evaluator Model", eval_data.get('evaluator_model', 'N/A')])
+        table_data.append(["Test Dataset", eval_data.get('test_dataset', 'N/A')])
+        table_data.append(["Test Size", eval_data.get('test_size', 'N/A')])
 
-        # 성공 수 추가
+        # Performance Metrics Section
+        add_section_header("Performance Metrics")
+
+        # Add success count
         if 'successful_count' in eval_data:
-            table_data.append(["성공 수", f"{eval_data.get('successful_count', 0)}/{eval_data.get('test_size', 0)}"])
+            success_rate = (eval_data.get('successful_count', 0) / eval_data.get('test_size', 1)) * 100
+            table_data.append(["Success Count",
+                               f"{eval_data.get('successful_count', 0)}/{eval_data.get('test_size', 0)} ({success_rate:.1f}%)"])
 
-        # 성능 지표
-        table_data.append(["정확도 (%)", f"{eval_data.get('accuracy', 0):.2f}"])
-        table_data.append(["평균 처리 시간 (s)", f"{eval_data.get('avg_processing_time', 0):.3f}"])
-        table_data.append(["배치 처리량 (query/s)", f"{eval_data.get('batch_throughput', 0):.2f}"])
+        table_data.append(["Accuracy", f"{eval_data.get('accuracy', 0):.2f}%"])
 
-        # 추가 시간 지표 (ms -> s 변환된 값)
+        # Time Metrics
+        add_section_header("Time Metrics")
+        table_data.append(["Avg Processing Time", f"{eval_data.get('avg_processing_time', 0):.3f} sec/query"])
+        table_data.append(["Batch Throughput", f"{eval_data.get('batch_throughput', 0):.2f} queries/sec"])
+
+        # Additional time metrics (ms -> s converted values)
         if 'avg_translation_time_s' in eval_data:
-            table_data.append(["평균 변환 시간 (s)", f"{eval_data.get('avg_translation_time_s', 0):.3f}"])
+            table_data.append(["Avg Translation Time", f"{eval_data.get('avg_translation_time_s', 0):.3f} sec"])
         if 'avg_verification_time_s' in eval_data:
-            table_data.append(["평균 검증 시간 (s)", f"{eval_data.get('avg_verification_time_s', 0):.3f}"])
+            table_data.append(["Avg Verification Time", f"{eval_data.get('avg_verification_time_s', 0):.3f} sec"])
 
-        # # 설정 정보
-        # table_data.append(["배치 크기", eval_data.get('batch_size', 'N/A')])
-        # table_data.append(["최대 동시 요청", eval_data.get('max_concurrent', 'N/A')])
-        # table_data.append(["최대 재시도 횟수", eval_data.get('max_retries', 'N/A')])
-
-        # 테이블 출력
+        # Output table - using grid format for better alignment
         table = tabulate(table_data, headers=headers, tablefmt="grid")
 
-        # 로깅 레벨을 INFO로 설정하고 tabulate 결과를 출력
-        # print() 대신 logger를 사용해 일관성 유지
-        self.logger.info(f"\n평가 결과 요약:\n{table}")
+        # Logging
+        self.logger.info(f"\nEvaluation Results Summary:\n{table}")
 
     def _append_to_csv(self, eval_data):
         """평가 결과를 CSV 파일에 추가"""

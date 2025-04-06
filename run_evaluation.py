@@ -9,6 +9,21 @@ from utils import config
 from utils.common import check_and_create_directory, autotrain
 
 
+__version__ = "1.0"
+__date__ = "2025-04-06"  # 오늘 날짜로 설정
+__developer__ = "thchoi@GTOne"
+
+
+def print_version_info():
+    """프로그램 버전 정보 출력"""
+    import sys
+    prog_name = sys.argv[0]
+    print(f"\n{prog_name} 버전 {__version__}")
+    print(f"마지막 업데이트: {__date__}")
+    print(f"개발자: {__developer__}")
+    print("-" * 40)
+
+
 def setup_root_logger():
     """루트 로거 초기화 함수"""
     # 기존에 설정된 모든 핸들러 제거
@@ -77,7 +92,18 @@ def add_file_handler(log_filepath, level=logging.DEBUG):
 
 
 if __name__ == "__main__":
+    # 인자 파싱 전에 -v, --version 인자를 직접 확인
+    if len(sys.argv) > 1 and (sys.argv[1] == "-v" or sys.argv[1] == "--version"):
+        print_version_info()
+        sys.exit(0)
+
     args = config.parse_arguments()
+
+    # 버전 정보만 요청한 경우
+    if hasattr(args, 'version') and args.version:
+        print_version_info()
+        sys.exit(0)
+
     program_start_time = time.time()
 
     check_and_create_directory(args.prefix)
@@ -100,6 +126,9 @@ if __name__ == "__main__":
         logging.info(f"배치 처리 프로그램 시작 (모드: {args.mode}, 로그 파일: {abs_log_path})")
     else:
         logging.info(f"NL2SQL 평가 프로그램 시작 (명령: {args.command}, 로그 파일: {abs_log_path})")
+
+    # 일반 로그와 별도로 버전 정보 출력
+    print_version_info()
 
     command_start_time = time.time()
 

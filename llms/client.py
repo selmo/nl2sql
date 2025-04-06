@@ -183,10 +183,6 @@ async def llm_invoke_batch(model: str,
     max_concurrent = options.get('max_concurrent', 10)
     max_retries = options.get('max_retries', 3)
 
-    # 요청 ID 추적을 위한 딕셔너리
-    request_id_map = {}  # request_id -> task_id 매핑
-    task_id_map = {}  # task_id -> request_id 매핑
-
     # 재시도 정보 추적
     retry_counts = [0] * total_prompts  # 각 작업별 재시도 횟수
     failed_tasks = set()  # 실패한 작업 ID
@@ -208,81 +204,71 @@ async def llm_invoke_batch(model: str,
     # 응답 처리 함수를 llm_invoke_single에 전달하기 위한 래퍼 함수
     async def llm_invoke_single_with_processor(model, data, progress_tracker, session, task_id, url, options):
         """진행률 추적 기능이 추가된 단일 프롬프트 비동기 LLM 호출"""
-        # 고유 요청 ID 생성 (UUID)
-        request_id = str(uuid.uuid4())
-        request_id_map[request_id] = task_id
-        task_id_map[task_id] = request_id
-
         # 요청 시작 로깅
-        progress_tracker.update_task_progress(task_id, "start", request_id=request_id)
+        progress_tracker.update_task_progress(task_id, "start")
         start_time = time.time()
 
         prompt = make_prompt(model, data, options=options)
         request = make_request(model, prompt, options=options)
 
-        # 요청에 고유 ID 추가 (메타데이터가 없으면 생성)
-        if isinstance(request, dict):
-            if 'metadata' not in request:
-                request['metadata'] = {}
-            request['metadata']['request_id'] = request_id
-
-        logging.debug(f"요청 #{task_id} (ID: {request_id}): URL={url}")
         try:
             async with session.post(url, json=request) as response:
                 if response.status != 200:
                     error_text = await response.text()
                     elapsed = time.time() - start_time
-                    progress_tracker.update_task_progress(task_id, "failed", elapsed, error_text, request_id=request_id)
+                    progress_tracker.update_task_progress(task_id, "failed", elapsed, error_text)
 
                     # 재시도 횟수 업데이트
                     retry_counts[task_id] += 1
 
                     # 재시도 여부 결정
                     if retry_counts[task_id] <= max_retries:
-                        return {"error": error_text, "task_id": task_id, "request_id": request_id, "retry": True}
+                        return {"error": error_text, "task_id": task_id, "retry": True}
                     else:
                         failed_tasks.add(task_id)
                         processed_tasks.add(task_id)
-                        return {"error": error_text, "task_id": task_id, "request_id": request_id}
+                        return {"error": error_text, "task_id": task_id}
 
                 result = await response.json()
                 elapsed = time.time() - start_time
 
-                # 응답에 요청 ID와 작업 ID 추가
-                if isinstance(result, dict):
-                    result["request_id"] = request_id
-                    result["task_id"] = task_id
+                # 클라이언트 코드에서만 task_id 관리
+                local_result = {"orig_response": result, "task_id": task_id}
 
                 # 응답 처리 시도 (response_processor가 있는 경우)
                 if response_processor:
                     try:
                         processed_result = response_processor(result, None)
 
-                        # 처리된 결과에 요청 ID와 작업 ID 추가
-                        if isinstance(processed_result, dict):
-                            processed_result["request_id"] = request_id
-                            processed_result["task_id"] = task_id
+                        # # 처리된 결과에 요청 ID와 작업 ID 추가
+                        # if isinstance(processed_result, dict):
+                        #     processed_result["task_id"] = task_id
+                        #
+                        # result["processed_result"] = processed_result
+                        # progress_tracker.update_task_progress(task_id, "success", elapsed)
+                        #
+                        # # 처리 완료 표시
+                        # processed_tasks.add(task_id)
+                        # return result
 
-                        result["processed_result"] = processed_result
-                        progress_tracker.update_task_progress(task_id, "success", elapsed, request_id=request_id)
-
-                        # 처리 완료 표시
+                        # 처리된 결과는 내부 관리용으로만 task_id 추가
+                        progress_tracker.update_task_progress(task_id, "success", elapsed)
                         processed_tasks.add(task_id)
-                        return result
+                        # 저장/반환용 결과에는 task_id 포함
+                        return {"processed_result": processed_result, "task_id": task_id}
                     except Exception as process_error:
                         # 응답 처리 오류 시 기록하고 원본 결과 반환
-                        logging.error(f"응답 처리 중 오류 발생 (요청 #{task_id}, ID: {request_id}): {str(process_error)}")
+                        logging.error(f"응답 처리 중 오류 발생 (요청 #{task_id}: {str(process_error)}")
 
                         # 재시도 횟수 업데이트
                         retry_counts[task_id] += 1
 
                         # 재시도 여부 결정
                         if retry_counts[task_id] <= max_retries:
-                            return {"error": str(process_error), "task_id": task_id, "request_id": request_id,
-                                    "retry": True}
+                            return {"error": str(process_error), "task_id": task_id, "retry": True}
                         else:
                             result["processing_error"] = str(process_error)
-                            progress_tracker.update_task_progress(task_id, "success", elapsed, request_id=request_id)
+                            progress_tracker.update_task_progress(task_id, "success", elapsed)
 
                             # 처리 완료 표시
                             failed_tasks.add(task_id)
@@ -290,26 +276,26 @@ async def llm_invoke_batch(model: str,
                             return result
                 else:
                     # 응답 처리 함수가 없는 경우 원본 결과 반환
-                    progress_tracker.update_task_progress(task_id, "success", elapsed, request_id=request_id)
+                    progress_tracker.update_task_progress(task_id, "success", elapsed)
 
                     # 처리 완료 표시
                     processed_tasks.add(task_id)
                     return result
         except Exception as e:
             elapsed = time.time() - start_time
-            progress_tracker.update_task_progress(task_id, "failed", elapsed, str(e), request_id=request_id)
+            progress_tracker.update_task_progress(task_id, "failed", elapsed, str(e))
 
             # 재시도 횟수 업데이트
             retry_counts[task_id] += 1
 
             # 재시도 여부 결정
             if retry_counts[task_id] <= max_retries:
-                return {"error": str(e), "task_id": task_id, "request_id": request_id, "retry": True}
+                return {"error": str(e), "task_id": task_id, "retry": True}
             else:
                 # 처리 완료 표시
                 failed_tasks.add(task_id)
                 processed_tasks.add(task_id)
-                return {"error": str(e), "task_id": task_id, "request_id": request_id}
+                return {"error": str(e), "task_id": task_id}
 
     async with aiohttp.ClientSession(connector=conn, timeout=timeout) as session:
         for batch_idx in range(0, total_prompts, batch_size):
@@ -392,16 +378,13 @@ async def llm_invoke_batch(model: str,
             for task_id in missing_tasks:
                 all_results[task_id] = {
                     "error": "요청이 처리되지 않음 (유실)",
-                    "task_id": task_id,
-                    "request_id": task_id_map.get(task_id, f"missing_{task_id}")
+                    "task_id": task_id
                 }
 
     # 진행률 표시 종료
     progress_tracker.close()
 
     # 요청 ID 처리 통계 로깅
-    logging.info(f"요청 ID 매핑: 총 {len(request_id_map)}개 항목")
-    logging.info(f"작업 ID 매핑: 총 {len(task_id_map)}개 항목")
     logging.info(f"처리 완료된 작업: {len(processed_tasks)}개")
     logging.info(f"실패한 작업: {len(failed_tasks)}개")
 
@@ -438,8 +421,12 @@ def process_nl2sql_response(response: Dict[str, Any], metadata: Optional[Dict[st
     Returns:
         dict: 처리된 결과 (gen_sql 필드 포함)
     """
+    # 이미 처리된 결과가 있는지 확인
+    if 'processed_result' in response:
+        return response['processed_result']
+
     # 요청 ID 추출
-    request_id = response.get('request_id', None)
+    task_id = response.get('task_id', None)
 
     # 콘텐츠 추출
     content = extract_content_from_response(response)
@@ -450,8 +437,8 @@ def process_nl2sql_response(response: Dict[str, Any], metadata: Optional[Dict[st
     try:
         result = json.loads(content)
         if 'gen_sql' in result:
-            if request_id:
-                result['request_id'] = request_id
+            if task_id:
+                result['task_id'] = task_id
             return result
     except json.JSONDecodeError:
         pass
@@ -460,13 +447,12 @@ def process_nl2sql_response(response: Dict[str, Any], metadata: Optional[Dict[st
     sql_query = extract_sql_queries(content)
     if sql_query:
         result = {"gen_sql": sql_query}
-        if request_id:
-            result['request_id'] = request_id
+        if task_id:
+            result['task_id'] = task_id
         return result
 
     # 처리할 수 없는 응답
     raise ValueError(f"응답에서 SQL 쿼리를 추출할 수 없습니다: {response}")
-
 
 def process_evaluation_response(response: Dict[str, Any], metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
@@ -480,7 +466,7 @@ def process_evaluation_response(response: Dict[str, Any], metadata: Optional[Dic
         dict: 처리된 결과 (resolve_yn 필드 포함)
     """
     # 요청 ID 추출
-    request_id = response.get('request_id', None)
+    task_id = response.get('task_id', None)
 
     # 콘텐츠 추출
     content = extract_content_from_response(response)
@@ -491,8 +477,8 @@ def process_evaluation_response(response: Dict[str, Any], metadata: Optional[Dic
     result = extract_resolve_yn_from_text(content)
 
     # 요청 ID 추가
-    if request_id:
-        result['request_id'] = request_id
+    if task_id:
+        result['task_id'] = task_id
 
     return result
 
@@ -559,26 +545,23 @@ def process_response_by_mode(
 
     # 응답 처리
     for idx, response in enumerate(responses):
+        # 요청 ID 추출
+        task_id = response.get('task_id', idx)
+
         try:
-            # 요청 ID 추출
-            request_id = response.get('request_id', None)
-            task_id = response.get('task_id', idx)
-
-            # 응답 처리
-            processed_result = processor(response, None)
-
-            # 요청 ID 및 작업 ID 전달
-            if isinstance(processed_result, dict):
-                if request_id:
-                    processed_result['request_id'] = request_id
-                processed_result['task_id'] = task_id
+            # 이미 처리된 결과가 있는지 확인
+            if 'processed_result' in response:
+                processed_result = response['processed_result']
+            else:
+                # 응답 처리
+                processed_result = processor(response, None)
 
             # 결과 추가
             result_list.append((task_id, processed_result))
             success_count += 1
 
         except Exception as e:
-            logger.error(f"응답 처리 중 오류 발생 (인덱스 #{idx}): {str(e)}")
+            logger.error(f"응답 처리 중 오류 발생 (태스크 #{task_id}): {str(e)}")
             result_list.append((idx, None))
             error_count += 1
 
@@ -598,6 +581,7 @@ def process_response_by_mode(
     else:
         # 다른 모드 처리
         result_df[output_column] = [result for _, result in result_list]
+        result_df['task_id'] = [idx for idx, _ in result_list]
 
     # 성공/실패 통계 정보 추가
     result_df.attrs['success_count'] = success_count
@@ -625,3 +609,245 @@ def make_result(
     """
     result_df = process_response_by_mode(responses, dataset, options)
     return result_df, result_df.attrs.get('success_count', 0), result_df.attrs.get('error_count', 0)
+
+
+def process_evaluation_results(base_eval, dataset, output_path, model_name):
+    """
+    Process evaluation results and save success/failure cases
+
+    Args:
+        base_eval: DataFrame containing evaluation results
+        dataset: Original dataset with questions and contexts
+        output_path: Base path for saving output files
+        model_name: Name of the model used for evaluation
+
+    Returns:
+        tuple: (processed_df, success_count, failure_count)
+    """
+    import json
+    import ast
+    import pandas as pd
+    from pathlib import Path
+
+    # File paths for success and failure cases
+    success_cases_file = Path(output_path) / f"{model_name}_success_cases.csv"
+    failure_cases_file = Path(output_path) / f"{model_name}_failure_cases.csv"
+
+    # Step 1: Clean and normalize the resolve_yn values
+    base_eval = _normalize_resolve_yn_values(base_eval)
+
+    # Step 2: Extract task_ids and clean prompts
+    base_eval = _extract_metadata_from_prompts(base_eval)
+
+    # Log distribution of resolve_yn values
+    logging.info(f"resolve_yn distribution: {base_eval['resolve_yn'].value_counts().to_dict()}")
+
+    # Step 3: Save success and failure cases
+    success_count = _save_filtered_cases(base_eval, dataset, 'yes', success_cases_file)
+    failure_count = _save_filtered_cases(base_eval, dataset, 'no', failure_cases_file)
+
+    # Log results
+    if success_count > 0:
+        logging.info(f"Saved {success_count} success cases to {success_cases_file}")
+    else:
+        logging.info("No success cases found")
+
+    if failure_count > 0:
+        logging.info(f"Saved {failure_count} failure cases to {failure_cases_file}")
+    else:
+        logging.info("No failure cases found")
+
+    return base_eval, success_count, failure_count
+
+
+def _normalize_resolve_yn_values(df):
+    """Normalize resolve_yn values to consistent format"""
+
+    def safe_extract_resolve_yn(x):
+        if not isinstance(x, str):
+            return x
+
+        # Return as is if already in the expected format
+        x_lower = x.lower().strip()
+        if x_lower in ['yes', 'no', 'unknown']:
+            return x_lower
+
+        # Simple text matching
+        if x.lower().startswith('yes'):
+            return 'yes'
+        elif x.lower().startswith('no'):
+            return 'no'
+
+        # Pattern matching for common formats
+        if "'resolve_yn': 'yes'" in x or '"resolve_yn": "yes"' in x:
+            return 'yes'
+        elif "'resolve_yn': 'no'" in x or '"resolve_yn": "no"' in x:
+            return 'no'
+
+        # Try JSON parsing
+        try:
+            parsed = json.loads(x)
+            if isinstance(parsed, dict) and 'resolve_yn' in parsed:
+                return parsed['resolve_yn'].lower().strip()
+        except:
+            pass
+
+        return x
+
+    df_copy = df.copy()
+    df_copy['resolve_yn'] = df_copy['resolve_yn'].apply(
+        lambda x: safe_extract_resolve_yn(x) if pd.notna(x) else x
+    )
+    return df_copy
+
+
+def _extract_metadata_from_prompts(df):
+    """Extract task_ids and clean prompts from prompt column"""
+    import ast
+
+    def extract_task_id(prompt_data):
+        # Handle dictionary objects
+        if isinstance(prompt_data, dict):
+            # Check various paths for task_id
+            for path in ['task_id', 'request.task_id', 'metadata.task_id']:
+                parts = path.split('.')
+                value = prompt_data
+                for part in parts:
+                    if isinstance(value, dict) and part in value:
+                        value = value[part]
+                    else:
+                        value = None
+                        break
+                if value is not None:
+                    return value
+
+        # Handle string representations of dictionaries
+        elif isinstance(prompt_data, str):
+            try:
+                data = ast.literal_eval(prompt_data)
+                if isinstance(data, dict):
+                    # Recursively call with parsed dictionary
+                    return extract_task_id(data)
+            except:
+                pass
+
+        return None
+
+    def extract_prompt(prompt_data):
+        # Handle dictionary objects
+        if isinstance(prompt_data, dict):
+            # Check common paths for prompt
+            for path in ['prompt', 'request.prompt']:
+                parts = path.split('.')
+                value = prompt_data
+                for part in parts:
+                    if isinstance(value, dict) and part in value:
+                        value = value[part]
+                    else:
+                        value = None
+                        break
+                if value is not None:
+                    return value
+
+        # Handle string representations
+        try:
+            data = ast.literal_eval(prompt_data)
+            if isinstance(data, dict):
+                return extract_prompt(data)
+        except:
+            return prompt_data
+
+        return None
+
+    df_copy = df.copy()
+
+    # Apply transformations with error handling
+    if 'resolve_yn' in df_copy.columns:
+        df_copy['resolve_yn'] = df_copy['resolve_yn'].apply(
+            lambda x: x if pd.notna(x) else x
+        )
+
+    if 'prompt' in df_copy.columns:
+        df_copy['task_id'] = df_copy['prompt'].apply(
+            lambda x: extract_task_id(x) if pd.notna(x) else None
+        )
+
+        df_copy['prompt'] = df_copy['prompt'].apply(
+            lambda x: extract_prompt(x) if pd.notna(x) else None
+        )
+
+        # Log extraction results
+        task_id_count = df_copy['task_id'].notna().sum()
+        logging.info(f"Successfully extracted {task_id_count} task_ids from the prompt column")
+
+    return df_copy
+
+
+def _save_filtered_cases(base_eval, dataset, result_value, output_file):
+    """Save filtered cases (success or failure) to CSV file"""
+
+    def extract_sql_from_json(data):
+        """Extract SQL query from various data formats"""
+        if isinstance(data, dict) and 'gen_sql' in data:
+            return data['gen_sql']
+
+        try:
+            # Try JSON parsing
+            if isinstance(data, str):
+                parsed_data = json.loads(data)
+                if isinstance(parsed_data, dict) and 'gen_sql' in parsed_data:
+                    return parsed_data['gen_sql']
+                return parsed_data
+        except:
+            pass
+
+        return data
+
+    # Extract cases matching the result value
+    cases = base_eval[base_eval['resolve_yn'] == result_value].copy()
+
+    if cases.empty:
+        return 0
+
+    # Create details dataframe
+    case_details = pd.DataFrame()
+
+    # Set default values for columns
+    columns = ['task_id', 'question', 'context', 'gt_sql', 'gen_sql', 'prompt']
+    for col in columns:
+        case_details[col] = ""
+
+    # Map data from dataset and cases
+    for idx, case_idx in enumerate(cases.index.tolist()):
+        if case_idx < len(dataset):
+            if 'task_id' in dataset.columns:
+                case_details.at[idx, 'task_id'] = dataset.iloc[case_idx]['task_id']
+
+            # Copy data from dataset if columns exist
+            for col in ['question', 'context']:
+                if col in dataset.columns:
+                    case_details.at[idx, col] = dataset.iloc[case_idx][col]
+
+            # Handle special columns
+            if 'answer' in dataset.columns:
+                case_details.at[idx, 'gt_sql'] = dataset.iloc[case_idx]['answer']
+
+            if 'gen_sql' in dataset.columns:
+                data = dataset.iloc[case_idx]['gen_sql']
+                case_details.at[idx, 'gen_sql'] = extract_sql_from_json(data)
+
+                # Extract task_id if available in gen_sql and not already set
+                if isinstance(data, dict) and 'task_id' in data and not case_details.at[idx, 'task_id']:
+                    case_details.at[idx, 'task_id'] = data['task_id']
+
+            # Copy prompt if available
+            if 'prompt' in cases.columns and idx < len(cases):
+                case_details.at[idx, 'prompt'] = cases.iloc[idx]['prompt']
+
+    # Debug logging to check task_id availability
+    task_id_count = case_details['task_id'].apply(lambda x: x != "").sum()
+    logging.info(f"Including {task_id_count} task_ids in the {result_value} cases file")
+
+    # Save to CSV
+    case_details.to_csv(output_file, index=False)
+    return len(case_details)
