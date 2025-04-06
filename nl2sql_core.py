@@ -281,20 +281,23 @@ def perform_evaluation(options, dataset):
             model=model
         )
 
-        # Process results and save success/failure cases
-        base_eval, success_count, failure_count = process_evaluation_results(
-            base_eval,
-            dataset,
-            result_prefix,
-            f"{safe_base_model}-{safe_model}"
-        )
+        base_eval.sort_values(by='task_id', inplace=True)
 
         # Now save the fully processed data
         base_eval.to_csv(output_file, index=False)
         logging.info(f"Processed evaluation data saved to {output_file}, {len(base_eval)} rows, columns={base_eval.columns.tolist()}")
+
     else:
         base_eval = pd.read_csv(output_file)
         logging.info(f"Evaluation data loaded: {len(base_eval)} rows, columns={base_eval.columns.tolist()}")
+
+    # Process results and save success/failure cases
+    base_eval, success_count, failure_count = process_evaluation_results(
+        base_eval,
+        dataset,
+        result_prefix,
+        f"{safe_base_model}-{safe_model}"
+    )
 
     # 정확도 계산
     num_correct_answers = base_eval.query("resolve_yn == 'yes'").shape[0]

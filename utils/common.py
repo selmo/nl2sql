@@ -217,7 +217,7 @@ def change_jsonl_to_csv(input_file, prompt_column="prompt", response_column="res
             # logging.info(f"line: {line}")
             try:
                 json_data = json.loads(line)
-                logging.info(f"json_data: {json_data}\n\n")
+                # logging.info(f"json_data: {json_data}\n\n")
 
                 # 프롬프트 추출
                 if len(json_data) >= 1 and isinstance(json_data[0], dict):
@@ -379,7 +379,8 @@ def change_jsonl_to_csv(input_file, prompt_column="prompt", response_column="res
         unknown_count = sum(1 for r in responses if r != "yes" and r != "no")
         logging.info(f"resolve_yn 값 분포: yes={yes_count}, no={no_count}, 기타={unknown_count}")
 
-    dfs = pd.DataFrame({'task_id': task_ids, prompt_column: prompts, response_column: responses})
+    # dfs = pd.DataFrame({'task_id': task_ids, prompt_column: prompts, response_column: responses})
+    dfs = pd.DataFrame(prompts_and_responses)
 
     return dfs
 

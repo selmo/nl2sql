@@ -2,11 +2,10 @@ import asyncio
 import json
 import logging
 import time
-import uuid
-from typing import Union, Dict, Any, Optional, List
-
 import aiohttp
 import pandas as pd
+
+from typing import Union, Dict, Any, Optional, List
 from pandas import DataFrame
 
 from llms.templates import make_prompt, make_request
@@ -568,6 +567,23 @@ def process_response_by_mode(
     # 결과 정렬 및 데이터프레임에 추가
     result_list.sort(key=lambda x: x[0])  # task_id 기준 정렬
 
+    def extract_sql(data, column_name: str = 'gen_sql'):
+        """Extract SQL query from various data formats"""
+        if isinstance(data, dict) and column_name in data:
+            return data[column_name]
+
+        try:
+            if isinstance(data, str):
+                parsed_data = json.loads(data)
+                if isinstance(parsed_data, dict) and column_name in parsed_data:
+                    return parsed_data[column_name]
+                return parsed_data
+        except:
+            raise
+            pass
+
+        return data
+
     # 번역 모드 처리
     if mode == BatchMode.TRANSLATION:
         # 새 컬럼 초기화
@@ -580,7 +596,7 @@ def process_response_by_mode(
                 result_df.at[task_id, 'e_answer'] = result.get('sql_query', '')
     else:
         # 다른 모드 처리
-        result_df[output_column] = [result for _, result in result_list]
+        result_df[output_column] = [extract_sql(result, output_column) for _, result in result_list]
         result_df['task_id'] = [idx for idx, _ in result_list]
 
     # 성공/실패 통계 정보 추가
@@ -643,8 +659,12 @@ def process_evaluation_results(base_eval, dataset, output_path, model_name):
     logging.info(f"resolve_yn distribution: {base_eval['resolve_yn'].value_counts().to_dict()}")
 
     # Step 3: Save success and failure cases
-    success_count = _save_filtered_cases(base_eval, dataset, 'yes', success_cases_file)
-    failure_count = _save_filtered_cases(base_eval, dataset, 'no', failure_cases_file)
+    logging.info(f'dataset: {dataset.keys()}')
+    dataset_selected = dataset[['task_id', 'question', 'answer', 'gen_sql', 'context']]
+    merged = base_eval.merge(dataset_selected, on='task_id', how='inner')
+    merged = merged.rename(columns={'answer': 'gt_sql'})
+    success_count = _save_filtered_cases(merged, 'yes', success_cases_file)
+    failure_count = _save_filtered_cases(merged, 'no', failure_cases_file)
 
     # Log results
     if success_count > 0:
@@ -705,34 +725,6 @@ def _extract_metadata_from_prompts(df):
     """Extract task_ids and clean prompts from prompt column"""
     import ast
 
-    def extract_task_id(prompt_data):
-        # Handle dictionary objects
-        if isinstance(prompt_data, dict):
-            # Check various paths for task_id
-            for path in ['task_id', 'request.task_id', 'metadata.task_id']:
-                parts = path.split('.')
-                value = prompt_data
-                for part in parts:
-                    if isinstance(value, dict) and part in value:
-                        value = value[part]
-                    else:
-                        value = None
-                        break
-                if value is not None:
-                    return value
-
-        # Handle string representations of dictionaries
-        elif isinstance(prompt_data, str):
-            try:
-                data = ast.literal_eval(prompt_data)
-                if isinstance(data, dict):
-                    # Recursively call with parsed dictionary
-                    return extract_task_id(data)
-            except:
-                pass
-
-        return None
-
     def extract_prompt(prompt_data):
         # Handle dictionary objects
         if isinstance(prompt_data, dict):
@@ -768,86 +760,28 @@ def _extract_metadata_from_prompts(df):
         )
 
     if 'prompt' in df_copy.columns:
-        df_copy['task_id'] = df_copy['prompt'].apply(
-            lambda x: extract_task_id(x) if pd.notna(x) else None
-        )
-
         df_copy['prompt'] = df_copy['prompt'].apply(
             lambda x: extract_prompt(x) if pd.notna(x) else None
         )
 
-        # Log extraction results
-        task_id_count = df_copy['task_id'].notna().sum()
-        logging.info(f"Successfully extracted {task_id_count} task_ids from the prompt column")
-
     return df_copy
 
 
-def _save_filtered_cases(base_eval, dataset, result_value, output_file):
+def _save_filtered_cases(dataset, result_value, output_file):
     """Save filtered cases (success or failure) to CSV file"""
 
-    def extract_sql_from_json(data):
-        """Extract SQL query from various data formats"""
-        if isinstance(data, dict) and 'gen_sql' in data:
-            return data['gen_sql']
-
-        try:
-            # Try JSON parsing
-            if isinstance(data, str):
-                parsed_data = json.loads(data)
-                if isinstance(parsed_data, dict) and 'gen_sql' in parsed_data:
-                    return parsed_data['gen_sql']
-                return parsed_data
-        except:
-            pass
-
-        return data
-
     # Extract cases matching the result value
-    cases = base_eval[base_eval['resolve_yn'] == result_value].copy()
+    cases = dataset[dataset['resolve_yn'] == result_value].copy()
 
     if cases.empty:
         return 0
 
-    # Create details dataframe
-    case_details = pd.DataFrame()
-
-    # Set default values for columns
-    columns = ['task_id', 'question', 'context', 'gt_sql', 'gen_sql', 'prompt']
-    for col in columns:
-        case_details[col] = ""
-
-    # Map data from dataset and cases
-    for idx, case_idx in enumerate(cases.index.tolist()):
-        if case_idx < len(dataset):
-            if 'task_id' in dataset.columns:
-                case_details.at[idx, 'task_id'] = dataset.iloc[case_idx]['task_id']
-
-            # Copy data from dataset if columns exist
-            for col in ['question', 'context']:
-                if col in dataset.columns:
-                    case_details.at[idx, col] = dataset.iloc[case_idx][col]
-
-            # Handle special columns
-            if 'answer' in dataset.columns:
-                case_details.at[idx, 'gt_sql'] = dataset.iloc[case_idx]['answer']
-
-            if 'gen_sql' in dataset.columns:
-                data = dataset.iloc[case_idx]['gen_sql']
-                case_details.at[idx, 'gen_sql'] = extract_sql_from_json(data)
-
-                # Extract task_id if available in gen_sql and not already set
-                if isinstance(data, dict) and 'task_id' in data and not case_details.at[idx, 'task_id']:
-                    case_details.at[idx, 'task_id'] = data['task_id']
-
-            # Copy prompt if available
-            if 'prompt' in cases.columns and idx < len(cases):
-                case_details.at[idx, 'prompt'] = cases.iloc[idx]['prompt']
-
     # Debug logging to check task_id availability
-    task_id_count = case_details['task_id'].apply(lambda x: x != "").sum()
+    task_id_count = cases['task_id'].apply(lambda x: x != "").sum()
     logging.info(f"Including {task_id_count} task_ids in the {result_value} cases file")
 
     # Save to CSV
-    case_details.to_csv(output_file, index=False)
-    return len(case_details)
+    cases.sort_values(by='task_id', inplace=True)
+    cases.to_csv(output_file, index=False)
+
+    return len(cases)
