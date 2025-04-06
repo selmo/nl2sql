@@ -199,7 +199,7 @@ if [ ! -z "$TEST_SIZE_CLI" ]; then
   TEST_SIZE_OPT="--test-size $TEST_SIZE"
 fi
 
-if [ "$NO_EVAL" = true]; then
+if [ "$NO_EVAL" = true ]; then
   NO_EVAL_OPT="--no-evaluation"
 fi
 
