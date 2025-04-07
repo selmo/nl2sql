@@ -178,6 +178,8 @@ async def llm_invoke_batch(model: str,
             options['mode'] = BatchMode.NL2SQL
             logging.warning(f"지원되지 않는 모드 문자열: {options['mode']}, 기본값 NL2SQL 사용")
 
+    logging.info(f'options: {options}')
+
     batch_size = options.get('batch_size', 10)
     max_concurrent = options.get('max_concurrent', 10)
     max_retries = options.get('max_retries', 3)
