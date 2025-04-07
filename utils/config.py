@@ -16,7 +16,7 @@ class BatchMode(Enum):
         for mode in cls:
             if mode.value == value:
                 return mode
-        raise ValueError(f"지원되지 않는 모드: {value}")
+        raise ValueError(f"BatchMode - 지원되지 않는 모드: {value}")
 
 
 def parse_arguments():
