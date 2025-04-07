@@ -148,7 +148,7 @@ class EvalResultsLogger:
             fieldnames = [
                 'timestamp', 'nl2sql_model', 'test_dataset', 'test_size', 'successful_count', 'accuracy',
                 'avg_processing_time', 'batch_throughput', 'model_size', 'comments', 'phase',
-                'throughput', 'success_rate', 'error_rate'
+                'throughput', 'success_rate', 'error_rate', 'avg_translation_time_s', 'avg_verification_time_s'
             ]
 
 

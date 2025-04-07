@@ -8,6 +8,8 @@ from pathlib import Path
 from huggingface_hub import login
 from pandas import DataFrame
 
+from utils.config import BatchMode
+
 
 def load_dataset(options):
     """
@@ -58,21 +60,7 @@ def load_dataset(options):
 
         logging.info(f"데이터셋 로드 완료: {len(df)}개 데이터")
 
-        # 옵션에 모드 명시적 설정
-        if dataset_path.endswith('/synthetic_text_to_sql'):
-            ds_options = {
-                'context_column': 'sql_context',
-                'question_column': 'sql_prompt',
-                'answer_column': 'sql',
-            }
-        else:
-            ds_options = {
-                'context_column': options.answer_column or 'context',
-                'question_column': options.question_column or 'question',
-                'answer_column': options.answer_column or 'answer',
-            }
-
-        return df, ds_options
+        return df, dataset_path
 
     except Exception as e:
         logging.error(f"데이터셋 '{dataset_path}:{dataset_name}:{dataset_split}' 로드 중 오류 발생: {str(e)}")
@@ -93,13 +81,33 @@ def load_dataset(options):
                 isinstance(options.test_size, (int, float))):
             df = df[:int(options.test_size)]
 
+        return df, dataset_path
+
+
+def get_options(options, dataset_path):
+    dataset_path = dataset_path.split(':')[0]
+    # 옵션에 모드 명시적 설정
+    if dataset_path.endswith('/synthetic_text_to_sql'):
         ds_options = {
-            'context_column': 'context',
-            'question_column': 'question',
-            'answer_column': 'answer',
+            'context_column': 'sql_context',
+            'question_column': 'sql_prompt',
+            'answer_column': 'sql',
+        }
+    else:
+        ds_options = {
+            'context_column': options.answer_column or 'context',
+            'question_column': options.question_column or 'question',
+            'answer_column': options.answer_column or 'answer',
         }
 
-        return df, ds_options
+    ds_options['mode'] = BatchMode.NL2SQL  # 열거형 직접 사용
+    ds_options['input_column'] = options.input_column or 'input'
+    ds_options['output_column'] = options.output_column or 'gen_sql'
+    ds_options['batch_size'] = options.batch_size
+    ds_options['max_retries'] = options.max_retries
+    ds_options['max_concurrent'] = options.max_concurrent
+
+    return ds_options
 
 
 def load_dataset_from_path(dataset_path_str):

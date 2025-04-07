@@ -178,8 +178,6 @@ async def llm_invoke_batch(model: str,
             options['mode'] = BatchMode.NL2SQL
             logging.warning(f"지원되지 않는 모드 문자열: {options['mode']}, 기본값 NL2SQL 사용")
 
-    logging.info(f'options: {options}')
-
     batch_size = options.get('batch_size', 10)
     max_concurrent = options.get('max_concurrent', 10)
     max_retries = options.get('max_retries', 3)
@@ -212,6 +210,7 @@ async def llm_invoke_batch(model: str,
         prompt = make_prompt(model, data, options=options)
         request = make_request(model, prompt, options=options)
 
+        logging.debug(f'request:\n{request}')
         try:
             async with session.post(url, json=request) as response:
                 if response.status != 200:
@@ -623,7 +622,7 @@ def make_result(
     return result_df, result_df.attrs.get('success_count', 0), result_df.attrs.get('error_count', 0)
 
 
-def process_evaluation_results(base_eval, dataset, output_path, model_name):
+def process_evaluation_results(base_eval, dataset, output_path, model_name, options):
     """
     Process evaluation results and save success/failure cases
 
@@ -656,7 +655,12 @@ def process_evaluation_results(base_eval, dataset, output_path, model_name):
 
     # Step 3: Save success and failure cases
     logging.info(f'dataset: {dataset.keys()}')
-    dataset_selected = dataset[['task_id', 'question', 'answer', 'gen_sql', 'context']]
+    question = options.get('question_column', 'question')
+    answer = options.get('answer_column', 'answer')
+    output = options.get('output_column', 'gen_sql')
+    context = options.get('context_column', 'context')
+
+    dataset_selected = dataset[['task_id', question, answer, output, context]]
     merged = base_eval.merge(dataset_selected, on='task_id', how='inner')
     merged = merged.rename(columns={'answer': 'gt_sql'})
     success_count = _save_filtered_cases(merged, 'yes', success_cases_file)

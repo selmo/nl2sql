@@ -724,6 +724,7 @@ def process_by_file(
         batch_size: Size of processing batches for progress tracking.
         response_processor: Function to process API responses.
         prefix: Directory prefix for logs and other files.
+        request_timeout: Timeout of request
     """
     # 결과 파일 경로 설정
     if save_filepath is None:

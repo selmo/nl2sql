@@ -101,8 +101,6 @@ def make_prompt(model: str, data, options=None):
     # DBMS 특화 지시사항 생성
     dbms_instructions = get_dbms_specific_instructions(dbms)
 
-    logging.info(f'batch_mode: {batch_mode}')
-
     # NL2SQL 모드
     if batch_mode == BatchMode.NL2SQL or str(batch_mode) == "nl2sql":
         if evaluation:

@@ -15,7 +15,7 @@ from llms.templates import make_request_jobs, make_prompt
 from utils import common
 from os.path import join
 from utils.config import get_apikey, BatchMode, get_hf_token
-from utils.common import change_jsonl_to_csv, upload_to_huggingface, extract_resolve_yn_from_text
+from utils.common import change_jsonl_to_csv, upload_to_huggingface, extract_resolve_yn_from_text, get_options
 from os import path
 from pathlib import Path
 from utils.common import check_and_create_directory, get_api_url, sanitize_filename, load_dataset
@@ -49,7 +49,8 @@ def prepare_evaluation(options):
     logging.info(f"처리 결과 파일 없음, 새로 생성: {filepath}")
 
     # 데이터셋 로드
-    df, ds_options = load_dataset(options)
+    df, dataset_path = load_dataset(options)
+
     logging.info(f"데이터셋 로드 완료: {len(df)}행, 컬럼={df.columns.tolist()}")
 
     # NL2SQL 변환 시작 시간
@@ -62,12 +63,7 @@ def prepare_evaluation(options):
     response_processor = get_processor_for_mode('nl2sql')
 
     # 옵션에 모드 명시적 설정
-    ds_options['mode'] = BatchMode.NL2SQL,  # 열거형 직접 사용
-    ds_options['input_column'] = options.input_column or 'input'
-    ds_options['output_column'] = options.output_column or 'gen_sql'
-    ds_options['batch_size'] = options.batch_size
-    ds_options['max_retries'] = options.max_retries
-    ds_options['max_concurrent'] = options.max_concurrent
+    ds_options = get_options(options, dataset_path)
 
     # API URL 설정
     api_url = get_api_url(options.ollama_url, options.base_model)
@@ -195,16 +191,15 @@ def perform_evaluation(options, dataset):
     save_filepath = join(result_prefix, f"{safe_base_model}_{safe_model}_results.jsonl")
     output_file = join(result_prefix, f"{safe_base_model}-{safe_model}.csv")
 
-    # # 성공/실패 케이스용 파일 경로 추가
-    # success_cases_file = join(result_prefix, f"{safe_base_model}-{safe_model}_success_cases.csv")
-    # failure_cases_file = join(result_prefix, f"{safe_base_model}-{safe_model}_failure_cases.csv")
-
     # logging.info("DataFrame:\n%s", dataset)
     logging.info("Evaluation file path: %s", output_file)
 
+    ds_options = get_options(options, getattr(options, 'test_dataset', ''))
+    ds_options['evaluation'] = True
+
     if not Path(requests_filepath).exists():
         # 평가를 위한 requests.jsonl 생성
-        jobs_with_id = make_request_jobs(model, dataset, options={'evaluation': True})
+        jobs_with_id = make_request_jobs(model, dataset, options=ds_options)
 
         with open(requests_filepath, "w") as f:
             for job_with_id in jobs_with_id:
@@ -291,7 +286,8 @@ def perform_evaluation(options, dataset):
         base_eval,
         dataset,
         result_prefix,
-        f"{safe_base_model}-{safe_model}"
+        f"{safe_base_model}-{safe_model}",
+        ds_options
     )
 
     # 정확도 계산
