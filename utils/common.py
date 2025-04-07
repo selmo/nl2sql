@@ -8,7 +8,8 @@ from pathlib import Path
 from huggingface_hub import login
 from pandas import DataFrame
 
-def load_dataset(options) -> DataFrame:
+
+def load_dataset(options):
     """
     옵션에 따라 데이터셋 로드
 
@@ -56,7 +57,22 @@ def load_dataset(options) -> DataFrame:
                 return load_dataset_from_path(options.test_size)
 
         logging.info(f"데이터셋 로드 완료: {len(df)}개 데이터")
-        return df
+
+        # 옵션에 모드 명시적 설정
+        if dataset_path.endswith('/synthetic_text_to_sql'):
+            ds_options = {
+                'context_column': 'sql_context',
+                'question_column': 'sql_prompt',
+                'answer_column': 'sql',
+            }
+        else:
+            ds_options = {
+                'context_column': options.answer_column or 'context',
+                'question_column': options.question_column or 'question',
+                'answer_column': options.answer_column or 'answer',
+            }
+
+        return df, ds_options
 
     except Exception as e:
         logging.error(f"데이터셋 '{dataset_path}:{dataset_name}:{dataset_split}' 로드 중 오류 발생: {str(e)}")
@@ -77,7 +93,13 @@ def load_dataset(options) -> DataFrame:
                 isinstance(options.test_size, (int, float))):
             df = df[:int(options.test_size)]
 
-        return df
+        ds_options = {
+            'context_column': 'context',
+            'question_column': 'question',
+            'answer_column': 'answer',
+        }
+
+        return df, ds_options
 
 
 def load_dataset_from_path(dataset_path_str):
@@ -233,7 +255,7 @@ def change_jsonl_to_csv(input_file, prompt_column="prompt", response_column="res
                     prompt = ""
 
                 prompts.append(prompt)
-                prompt_and_response = { prompt_column : prompt }
+                prompt_and_response = {prompt_column: prompt}
 
                 # 응답 추출
                 if len(json_data) >= 2 and isinstance(json_data[1], dict):
@@ -367,7 +389,6 @@ def change_jsonl_to_csv(input_file, prompt_column="prompt", response_column="res
                 prompt_and_response[response_column] = response
                 prompt_and_response['task_id'] = task_id
                 prompts_and_responses.append(prompt_and_response)
-
 
     # 로깅 추가
     logging.info(f"JSONL 파일에서 {len(prompts)}개 항목 추출")

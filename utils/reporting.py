@@ -53,7 +53,7 @@ class EvalResultsLogger:
 
         self.logger.info(f"평가 결과를 {self.csv_path}에 저장합니다.")
 
-    def log_evaluation_result(self, eval_data):
+    def log_evaluation_result(self, eval_data, evaluation: bool = False):
         """
         평가 결과를 로그로 출력하고 CSV 파일에 추가
 
@@ -83,7 +83,7 @@ class EvalResultsLogger:
         self._print_table(eval_data)
 
         # CSV 파일에 결과 추가
-        self._append_to_csv(eval_data)
+        self._append_to_csv(eval_data, evaluation)
 
         return eval_data
 
@@ -134,20 +134,23 @@ class EvalResultsLogger:
         # Logging
         self.logger.info(f"\nEvaluation Results Summary:\n{table}")
 
-    def _append_to_csv(self, eval_data):
+    def _append_to_csv(self, eval_data, evaluation: bool = False):
         """평가 결과를 CSV 파일에 추가"""
         # 파일 존재 여부 확인
         file_exists = os.path.isfile(self.csv_path)
 
-        fieldnames = [
-            'timestamp', 'nl2sql_model', 'evaluator_model', 'test_dataset',
-            'test_size', 'successful_count', 'accuracy', 'avg_processing_time',
-            'batch_throughput',
-            # 'batch_size', 'max_concurrent', 'max_retries',
-            'model_size', 'quantization', 'comments',
-            'phase', 'avg_translation_time_s', 'throughput', 'success_rate', 'error_rate',
-            'avg_verification_time_s'  # ms -> s로 변경
-        ]
+        if evaluation:
+            fieldnames = [
+                'timestamp', 'nl2sql_model', 'evaluator_model', 'test_dataset',
+                'test_size', 'successful_count', 'accuracy', 'comments', 'phase'
+            ]
+        else:
+            fieldnames = [
+                'timestamp', 'nl2sql_model', 'test_dataset', 'test_size', 'successful_count', 'accuracy',
+                'avg_processing_time', 'batch_throughput', 'model_size', 'comments', 'phase',
+                'throughput', 'success_rate', 'error_rate'
+            ]
+
 
         # CSV 파일에 데이터 추가
         with open(self.csv_path, 'a', newline='', encoding='utf-8') as csvfile:

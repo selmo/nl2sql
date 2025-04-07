@@ -82,6 +82,8 @@ def make_prompt(model: str, data, options=None):
     evaluation = options.get('evaluation', False)
     field_question = options.get('question_column', 'question')
     field_answer = options.get('answer_column', 'answer')
+    field_output = options.get('output_column', 'gen_sql')
+    field_context = options.get('context_column', 'context')
 
     # DBMS 정보 추출
     dbms = data.get('dbms', None)
@@ -94,7 +96,6 @@ def make_prompt(model: str, data, options=None):
         else:
             dbms = None
     else:
-        logging.info(f'dbms type: {type(dbms)}, {dbms}')
         dbms = ""
 
     # DBMS 특화 지시사항 생성
@@ -105,10 +106,10 @@ def make_prompt(model: str, data, options=None):
         if evaluation:
             return evaluation_template.format(
             # return eval_template_1.format(
-                schema=data.get('context', ''),
+                schema=data.get(field_context, ''),
                 question=data.get(field_question, ''),
                 gt_sql=data.get(field_answer, ''),
-                gen_sql=data.get('gen_sql', ''),
+                gen_sql=data.get(field_output, ''),
                 # dbms=dbms or "SQL"  # 기본값으로 일반 SQL 지정
             )
         else:
@@ -118,13 +119,13 @@ def make_prompt(model: str, data, options=None):
             # )
             if model.lower().startswith('sqlcoder'):
                 return sqlcoder_template_2.format(
-                    schema=data.get('context', ''),
+                    schema=data.get(field_context, ''),
                     question=data.get(field_question, ''),
                 )
             else:
                 # 기본 템플릿에 DBMS 정보 추가
                 return template_0.format(
-                    schema=data.get('context', ''),
+                    schema=data.get(field_context, ''),
                     question=data.get(field_question, ''),
                     # format_instructions=options.get('format_instructions', ''),
                     # dbms=dbms or "SQL",  # 기본값으로 일반 SQL 지정

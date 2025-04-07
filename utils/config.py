@@ -67,10 +67,14 @@ def parse_arguments():
                         help='테스트 데이터셋 이름 (기본값: "shangrilar/ko_text2sql:origin:test")')
     batch_group.add_argument('--results-file', type=str, default="[PREFIX]/nl2sql_eval_results.csv",
                         help='평가 결과를 저장할 CSV 파일 이름')
+    batch_group.add_argument('--context-column', type=str, default="context",
+                        help='질문 컬럼명')
     batch_group.add_argument('--question-column', type=str, default="question",
                         help='질문 컬럼명')
     batch_group.add_argument('--answer-column', type=str, default="answer",
                         help='응답 컬럼명')
+    batch_group.add_argument('--output-column', type=str, default=None,
+                        help='출력 데이터 컬럼 이름')
     batch_group.add_argument('--no-evaluation', action='store_true', default=False,
                         help='평가 절차 제외')
 
@@ -86,8 +90,6 @@ def parse_arguments():
     # 입력 및 출력 컬럼 지정 (custom 모드나 translate 모드 등에서 사용)
     batch_group.add_argument('--input-column', type=str, default=None,
                         help='입력 데이터 컬럼 이름')
-    batch_group.add_argument('--output-column', type=str, default=None,
-                        help='출력 데이터 컬럼 이름')
     batch_group.add_argument('--upload-to-hf', type=str, default=None,
                         help='huggingface로 업로드 (repo-id를 지정)')
     batch_group.add_argument('--from-file', type=str, default=None,

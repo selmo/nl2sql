@@ -49,7 +49,7 @@ def prepare_evaluation(options):
     logging.info(f"처리 결과 파일 없음, 새로 생성: {filepath}")
 
     # 데이터셋 로드
-    df = load_dataset(options)
+    df, ds_options = load_dataset(options)
     logging.info(f"데이터셋 로드 완료: {len(df)}행, 컬럼={df.columns.tolist()}")
 
     # NL2SQL 변환 시작 시간
@@ -62,16 +62,12 @@ def prepare_evaluation(options):
     response_processor = get_processor_for_mode('nl2sql')
 
     # 옵션에 모드 명시적 설정
-    batch_options = {
-        'mode': BatchMode.NL2SQL,  # 열거형 직접 사용
-        'input_column': options.input_column or 'question',
-        'output_column': options.output_column or 'gen_sql',
-        'question_column': options.question_column or 'question',
-        'answer_column': options.answer_column or 'answer',
-        'batch_size': options.batch_size,
-        'max_retries': options.max_retries,
-        'max_concurrent': options.max_concurrent,
-    }
+    ds_options['mode'] = BatchMode.NL2SQL,  # 열거형 직접 사용
+    ds_options['input_column'] = options.input_column or 'input'
+    ds_options['output_column'] = options.output_column or 'gen_sql'
+    ds_options['batch_size'] = options.batch_size
+    ds_options['max_retries'] = options.max_retries
+    ds_options['max_concurrent'] = options.max_concurrent
 
     # API URL 설정
     api_url = get_api_url(options.ollama_url, options.base_model)
@@ -91,7 +87,7 @@ def prepare_evaluation(options):
         log_dir=abs_log_dir,
         warmup=warmup_enabled,
         response_processor=response_processor,
-        options=batch_options
+        options=ds_options
     )
 
     # NL2SQL 변환 종료 시간 측정
@@ -100,7 +96,7 @@ def prepare_evaluation(options):
 
     # 결과 처리
     from llms.client import make_result
-    results, success_count, error_count = make_result(responses, df, batch_options)
+    results, success_count, error_count = make_result(responses, df, ds_options)
 
     # 결과 저장
     results.to_json(filepath, orient='records', lines=True)
@@ -155,7 +151,7 @@ def prepare_evaluation(options):
     stats_dir = path.join(options.prefix, 'stats')
     check_and_create_directory(stats_dir)
     translation_logger = EvalResultsLogger(output_dir=stats_dir, filename='nl2sql_translation_stats.csv')
-    translation_logger.log_evaluation_result(nl2sql_stats)
+    translation_logger.log_evaluation_result(nl2sql_stats, evaluation=False)
 
     prepare_time = time.time() - start_time
     logging.info(f"테스트 데이터셋 준비 완료: {prepare_time:.2f}초 소요")
@@ -323,18 +319,18 @@ def perform_evaluation(options, dataset):
         # 'verification_throughput': total_size / verification_time if verification_time > 0 else 0,
     }
 
-    # 모델 크기 추정
-    model_name = options.base_model.lower()
-    if '7b' in model_name:
-        verification_stats['model_size'] = '7B'
-    elif '8b' in model_name:
-        verification_stats['model_size'] = '8B'
-    elif '13b' in model_name or '14b' in model_name:
-        verification_stats['model_size'] = '13-14B'
-    elif '27b' in model_name or '30b' in model_name:
-        verification_stats['model_size'] = '27-30B'
-    elif '70b' in model_name:
-        verification_stats['model_size'] = '70B'
+    # # 모델 크기 추정
+    # model_name = options.base_model.lower()
+    # if '7b' in model_name:
+    #     verification_stats['model_size'] = '7B'
+    # elif '8b' in model_name:
+    #     verification_stats['model_size'] = '8B'
+    # elif '13b' in model_name or '14b' in model_name:
+    #     verification_stats['model_size'] = '13-14B'
+    # elif '27b' in model_name or '30b' in model_name:
+    #     verification_stats['model_size'] = '27-30B'
+    # elif '70b' in model_name:
+    #     verification_stats['model_size'] = '70B'
 
     # 직접 로그 출력을 위한 상세 정보 출력
     logging.info("\n===== 검증 결과 요약 =====")
@@ -352,7 +348,7 @@ def perform_evaluation(options, dataset):
                                             filename='nl2sql_verification_stats.csv')
 
     # 로깅 수행
-    verification_logger.log_evaluation_result(verification_stats)
+    verification_logger.log_evaluation_result(verification_stats, evaluation=True)
 
     return base_eval, accuracy, eval_time
 

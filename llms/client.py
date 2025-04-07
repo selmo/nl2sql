@@ -243,17 +243,6 @@ async def llm_invoke_batch(model: str,
                     try:
                         processed_result = response_processor(result, None)
 
-                        # # 처리된 결과에 요청 ID와 작업 ID 추가
-                        # if isinstance(processed_result, dict):
-                        #     processed_result["task_id"] = task_id
-                        #
-                        # result["processed_result"] = processed_result
-                        # progress_tracker.update_task_progress(task_id, "success", elapsed)
-                        #
-                        # # 처리 완료 표시
-                        # processed_tasks.add(task_id)
-                        # return result
-
                         # 처리된 결과는 내부 관리용으로만 task_id 추가
                         progress_tracker.update_task_progress(task_id, "success", elapsed)
                         processed_tasks.add(task_id)
